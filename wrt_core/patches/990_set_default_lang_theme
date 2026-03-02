@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# 设置默认语言为中文
+uci set luci.main.lang='zh_cn'
+uci commit luci
+
+# Bootstrap 是默认主题，无需额外配置
