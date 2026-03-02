@@ -1,141 +1,106 @@
-# 编译指南
+# 京东云太乙 ER1 (RE-CS-07) OpenWrt 云编译
 
-## 1. 环境准备
+专为京东云太乙 ER1 路由器定制的 OpenWrt 云编译项目。
 
-首先安装 Linux 系统，推荐 Ubuntu LTS。
+## 设备信息
 
-## 2. 安装编译依赖
+- **设备型号**: 京东云太乙 ER1 (RE-CS-07)
+- **芯片**: Qualcomm IPQ6010
+- **特性**: 无 WiFi，有线 NSS 硬件加速
+
+## 源码
+
+基于 [LiBwrt/openwrt-6.x](https://github.com/LiBwrt/openwrt-6.x) 的 `main-nss` 分支，支持高通 NSS 满血加速。
+
+## 预装插件
+
+### 代理工具
+- luci-app-nikki (Mihomo) - 主用，轻便
+- luci-app-openclash - 备用，功能全
+- luci-app-homeproxy
+
+### DNS/广告过滤
+- luci-app-adguardhome
+- luci-app-smartdns
+
+### 网络工具
+- luci-app-ddns-go
+- luci-app-cloudflared (Cloudflare 零信任隧道)
+- luci-app-easytier
+- luci-app-lucky
+- luci-app-sqm
+- luci-app-upnp
+- luci-app-wol
+- luci-app-pbr
+- luci-app-oaf (应用过滤)
+
+### 系统管理
+- luci-app-dockerman
+- luci-app-diskman
+- luci-app-ttyd
+- luci-app-autoreboot
+- luci-app-package-manager
+
+### 文件共享
+- luci-app-samba4
+- luci-app-quickfile
+- luci-app-cupsd (打印服务)
+
+### 其他
+- luci-app-vsftpd (FTP服务)
+- luci-app-vlmcsd
+- luci-app-firewall
+- luci-app-arpbind (IP/MAC绑定)
+- luci-app-timecontrol (上网时间控制)
+
+## 编译方法
+
+### 云编译 (GitHub Actions)
+
+Fork 本仓库后，在 Actions 中手动触发编译。
+
+### 本地编译
+
+**要求**: Ubuntu 22.04 LTS 或 Debian 11
 
 ```bash
+# 安装依赖
 sudo apt -y update
 sudo apt -y full-upgrade
 sudo apt install -y dos2unix libfuse-dev
 sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+# 克隆仓库
+git clone https://github.com/你的用户名/JD-wrt_release.git
+cd JD-wrt_release
+
+# 编译太乙 ER1
+./build.sh jdcloud_er1_libwrt
 ```
 
-## 3. 使用步骤
+## 默认设置
 
-1.  克隆仓库：
-    ```bash
-    git clone https://github.com/ZqinKing/wrt_release.git
-    ```
-2.  进入目录：
-    ```bash
-    cd wrt_release
-    ```
+- 登录地址: `192.168.10.1`
+- 默认密码: 无
 
-## 4. 编译固件
+## 插件来源
 
-使用 `./build.sh` 脚本进行编译，支持以下设备：
+| Feed | 仓库 |
+|------|------|
+| small8 | https://github.com/kenzok8/small-package |
+| nikki | https://github.com/nikkinikki-org/OpenWrt-nikki |
 
-### 京东云
-
-*   **雅典娜(02)、亚瑟(01)、太乙(07)、AX5(JDC版)**:
-    ```bash
-    ./build.sh jdcloud_ipq60xx_immwrt
-    ./build.sh jdcloud_ipq60xx_libwrt
-    ```
-*   **百里**:
-    ```bash
-    ./build.sh jdcloud_ax6000_immwrt
-    ```
-
-### 阿里云
-
-*   **AP8220**:
-    ```bash
-    ./build.sh aliyun_ap8220_immwrt
-    ```
-
-### 领势
-
-*   **MX4200v1、MX4200v2、MX4300**:
-    ```bash
-    ./build.sh linksys_mx4x00_immwrt
-    ```
-
-### 奇虎
-
-*   **360v6**:
-    ```bash
-    ./build.sh qihoo_360v6_immwrt
-    ```
-
-### 红米
-
-*   **AX5**:
-    ```bash
-    ./build.sh redmi_ax5_immwrt
-    ```
-*   **AX6**:
-    ```bash
-    ./build.sh redmi_ax6_immwrt
-    ```
-*   **AX6000**:
-    ```bash
-    ./build.sh redmi_ax6000_immwrt21
-    ```
-
-### CMCC （中国移动）
-
-*   **RAX3000M**:
-    ```bash
-    ./build.sh cmcc_rax3000m_immwrt
-    ```
-
-### 斐讯
-
-*   **N1**:
-    ```bash
-    ./build.sh n1_immwrt
-    ```
-
-### 兆能
-
-*   **M2**:
-    ```bash
-    ./build.sh zn_m2_immwrt
-    ./build.sh zn_m2_libwrt
-    ```
-
-### Gemtek
-
-*   **W1701K**:
-    ```bash
-    ./build.sh gemtek_w1701k_immwrt
-    ```
-
-### 其他
-
-*   **X64**:
-    ```bash
-    ./build.sh x64_immwrt
-    ```
-
----
-
-## 5. 三方插件
-
-三方插件源自：[https://github.com/kenzok8/small-package.git](https://github.com/kenzok8/small-package.git)
-
-## 6. 项目结构说明
-
-- **wrt_core/**: 核心模块目录，包含所有配置、补丁和脚本。
-  - **compilecfg/**: 编译配置文件 (.ini)。
-  - **deconfig/**: 默认配置文件 (.config)。
-  - **modules/**: 模块化脚本 (general.sh, feeds.sh, packages.sh, system.sh)。
-  - **patches/**: 系统和软件包补丁。
-  - **scripts/**: 辅助脚本。
-  - **update.sh**: 更新逻辑主入口脚本。
-  - **pre_clone_action.sh**: 预克隆操作脚本。
-
-- **build.sh**: 主编译脚本，调用 `wrt_core` 中的资源。
-- **firmware/**: 编译完成的固件输出目录。
-
-## 7. OAF（应用过滤）功能使用说明
+## OAF（应用过滤）功能使用说明
 
 使用 OAF（应用过滤）功能前，需先完成以下操作：
 
-1.  打开系统设置 → 启动项 → 定位到「appfilter」
-2.  将「appfilter」当前状态**从已禁用更改为已启用**
-3.  完成配置后，点击**启动**按钮激活服务
+1. 打开系统设置 → 启动项 → 定位到「appfilter」
+2. 将「appfilter」当前状态**从已禁用更改为已启用**
+3. 完成配置后，点击**启动**按钮激活服务
+
+## 致谢
+
+- [LiBwrt](https://github.com/LiBwrt/openwrt-6.x) - OpenWrt NSS 源码
+- [kenzok8](https://github.com/kenzok8/small-package) - 插件合集
+- [nikkinikki-org](https://github.com/nikkinikki-org/OpenWrt-nikki) - Nikki/Mihomo
+- [ZqinKing](https://github.com/ZqinKing/wrt_release) - 原始编译框架

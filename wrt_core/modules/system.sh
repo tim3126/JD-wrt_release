@@ -5,7 +5,7 @@ fix_default_set() {
         find "$BUILD_DIR/feeds/luci/collections/" -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$THEME_SET/g" {} \;
     fi
 
-    install -Dm544 "$BASE_PATH/patches/990_set_argon_primary" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/990_set_argon_primary"
+    install -Dm544 "$BASE_PATH/patches/990_set_default_lang_theme" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/990_set_default_lang_theme"
     install -Dm544 "$BASE_PATH/patches/991_custom_settings" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/991_custom_settings"
     install -Dm544 "$BASE_PATH/patches/992_set-wifi-uci.sh" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/992_set-wifi-uci.sh"
 
@@ -288,6 +288,55 @@ update_menu_location() {
     local tailscale_path="$BUILD_DIR/feeds/small8/luci-app-tailscale/root/usr/share/luci/menu.d/luci-app-tailscale.json"
     if [ -d "$(dirname "$tailscale_path")" ] && [ -f "$tailscale_path" ]; then
         sed -i 's/services/vpn/g' "$tailscale_path"
+    fi
+
+    # 修复 ddns-go 菜单路径错误 (adminrvices -> admin/services)
+    local ddnsgo_path="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/usr/share/luci/menu.d/luci-app-ddns-go.json"
+    if [ -d "$(dirname "$ddnsgo_path")" ] && [ -f "$ddnsgo_path" ]; then
+        sed -i 's/adminrvices/admin\/services/g' "$ddnsgo_path"
+    fi
+
+    # 修复 pbr 菜单路径错误 (adminrvices -> admin/services)
+    local pbr_path="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/root/usr/share/luci/menu.d/luci-app-pbr.json"
+    if [ -d "$(dirname "$pbr_path")" ] && [ -f "$pbr_path" ]; then
+        sed -i 's/adminrvices/admin\/services/g' "$pbr_path"
+    fi
+
+    # 修复 timecontrol 菜单路径 (admin/control -> admin/services)
+    local timecontrol_path="$BUILD_DIR/package/luci-app-timecontrol/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
+    if [ -d "$(dirname "$timecontrol_path")" ] && [ -f "$timecontrol_path" ]; then
+        sed -i 's/admin\/control/admin\/services/g' "$timecontrol_path"
+    fi
+}
+
+# 添加 ddns-go UCI 默认配置（菜单依赖此配置存在）
+add_ddnsgo_uci_defaults() {
+    local uci_defaults_dir="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/etc/uci-defaults"
+    local config_dir="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/etc/config"
+
+    if [ -d "$BUILD_DIR/feeds/small8/luci-app-ddns-go" ]; then
+        mkdir -p "$uci_defaults_dir"
+        mkdir -p "$config_dir"
+
+        # 创建默认配置文件
+        cat > "$config_dir/ddns-go" << 'EOF'
+config ddns-go 'config'
+    option enabled '0'
+    option port '9876'
+EOF
+
+        # 创建 uci-defaults 脚本确保配置存在
+        cat > "$uci_defaults_dir/99-ddns-go-init" << 'EOF'
+#!/bin/sh
+[ -f /etc/config/ddns-go ] || {
+    touch /etc/config/ddns-go
+    uci set ddns-go.config=ddns-go
+    uci set ddns-go.config.enabled='0'
+    uci commit ddns-go
+}
+exit 0
+EOF
+        chmod +x "$uci_defaults_dir/99-ddns-go-init"
     fi
 }
 
