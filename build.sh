@@ -61,6 +61,11 @@ apply_config() {
 
     # 添加 Docker 依赖
     cat "$BASE_PATH/deconfig/docker_deps.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+
+    # 最后加载禁用配置（确保禁用设置生效）
+    if [ -f "$BASE_PATH/deconfig/disable_packages.config" ]; then
+        cat "$BASE_PATH/deconfig/disable_packages.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    fi
 }
 
 REPO_URL=$(read_ini_by_key "REPO_URL")
