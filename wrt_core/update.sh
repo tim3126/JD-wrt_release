@@ -23,8 +23,8 @@ fi
 FEEDS_CONF="feeds.conf.default"
 GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
 GOLANG_BRANCH="25.x"
-THEME_SET="argon"
-LAN_ADDR="192.168.1.1"
+THEME_SET="bootstrap"
+LAN_ADDR="192.168.10.1"
 
 SCRIPT_DIR=$(cd $(dirname $0) && pwd)
 BASE_PATH=${BASE_PATH:-$SCRIPT_DIR}
@@ -50,11 +50,11 @@ main() {
     update_default_lan_addr
     remove_something_nss_kmod
     update_affinity_script
-    update_ath11k_fw
+    # update_ath11k_fw  # 太乙ER1无WiFi，不需要ath11k固件
     # fix_mkpkg_format_invalid
     change_cpuusage
     update_tcping
-    add_ax6600_led
+    # add_ax6600_led  # 太乙ER1不是雅典娜AX6600，不需要LED控制
     set_custom_task
     apply_passwall_tweaks
     update_nss_pbuf_performance
@@ -68,15 +68,16 @@ main() {
     fix_quickstart
     update_oaf_deconfig
     add_timecontrol
-    add_gecoosac
+    add_ddnsgo_uci_defaults
+    add_nikki_proxy_defaults
+    # add_gecoosac  # 太乙ER1无WiFi，不需要集客AC控制器
     add_quickfile
     update_lucky
     fix_rust_compile_error
-    update_smartdns
+    # update_smartdns  # 使用small8 feed自带的smartdns
     update_diskman
     set_nginx_default_config
     update_uwsgi_limit_as
-    update_argon
     update_nginx_ubus_module
     check_default_settings
     install_opkg_distfeeds
