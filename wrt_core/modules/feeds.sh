@@ -1,17 +1,46 @@
 #!/usr/bin/env bash
 
+prepare_small8_feed() {
+    local local_feeds_root="$BUILD_DIR/.customfeeds"
+    local local_small8_dir="$local_feeds_root/small8"
+    local small8_repos=(
+        "https://github.com/kenzok8/small-package.git"
+        "https://gitee.com/aiyboy/small-package.git"
+    )
+
+    mkdir -p "$local_feeds_root"
+    rm -rf "$local_small8_dir"
+
+    for repo in "${small8_repos[@]}"; do
+        echo "正在准备 small8 feed: $repo"
+        if git clone --depth 1 --single-branch "$repo" "$local_small8_dir"; then
+            echo "small8 feed 准备完成: $repo"
+            return 0
+        fi
+        echo "small8 feed 拉取失败，尝试下一个源: $repo" >&2
+        rm -rf "$local_small8_dir"
+    done
+
+    echo "Error: failed to prepare small8 feed from all configured sources" >&2
+    exit 1
+}
+
 update_feeds() {
     local FEEDS_PATH="$BUILD_DIR/$FEEDS_CONF"
-    local SMALL8_REPO="https://gitee.com/aiyboy/small-package.git"
+    local LOCAL_SMALL8_DIR="$BUILD_DIR/.customfeeds/small8"
     if [[ -f "$BUILD_DIR/feeds.conf" ]]; then
         FEEDS_PATH="$BUILD_DIR/feeds.conf"
     fi
+
+    prepare_small8_feed
+
     sed -i '/^#/d' "$FEEDS_PATH"
     sed -i '/packages_ext/d' "$FEEDS_PATH"
     sed -i '/^src-git small8 /d' "$FEEDS_PATH"
+    sed -i '/^src-link small8 /d' "$FEEDS_PATH"
 
     [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-    echo "src-git small8 $SMALL8_REPO" >>"$FEEDS_PATH"
+    echo "src-link small8 $LOCAL_SMALL8_DIR" >>"$FEEDS_PATH"
 
     if ! grep -q "openwrt-passwall" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
@@ -39,6 +68,11 @@ update_feeds() {
     fi
 
     ./scripts/feeds update -a
+
+    if [ ! -d "$BUILD_DIR/feeds/small8" ]; then
+        echo "Error: feeds/small8 was not created after feeds update" >&2
+        exit 1
+    fi
 }
 
 install_nikki() {
