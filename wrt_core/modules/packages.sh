@@ -69,17 +69,81 @@ update_golang() {
     fi
 }
 
+
+clone_sparse_repo_packages() {
+    local repo_url="$1"
+    local target_dir="$2"
+    shift 2
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    if ! git clone --depth 1 --filter=blob:none --no-checkout "$repo_url" "$tmp_dir"; then
+        echo "Error: failed to clone $repo_url" >&2
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+
+    pushd "$tmp_dir" >/dev/null
+    git sparse-checkout init --cone
+    git sparse-checkout set "$@" || {
+        echo "Error: failed to sparse-checkout packages from $repo_url" >&2
+        popd >/dev/null
+        rm -rf "$tmp_dir"
+        exit 1
+    }
+    git checkout --quiet
+    popd >/dev/null
+
+    mkdir -p "$target_dir"
+    for pkg in "$@"; do
+        rm -rf "$target_dir/$pkg"
+        cp -rf "$tmp_dir/$pkg" "$target_dir/"
+    done
+
+    rm -rf "$tmp_dir"
+}
+
+restore_missing_small8_packages() {
+    local small8_dir="$BUILD_DIR/feeds/small8"
+
+    if [ ! -d "$small8_dir" ]; then
+        echo "Error: $small8_dir does not exist" >&2
+        exit 1
+    fi
+
+    if [ ! -d "$small8_dir/ddns-go" ] || [ ! -d "$small8_dir/luci-app-ddns-go" ]; then
+        echo "Restoring missing small8 packages: ddns-go / luci-app-ddns-go..."
+        clone_sparse_repo_packages "https://github.com/sirpdboy/luci-app-ddns-go.git" "$small8_dir" ddns-go luci-app-ddns-go
+    fi
+
+    if [ ! -d "$small8_dir/luci-app-homeproxy" ]; then
+        echo "Restoring missing small8 package: luci-app-homeproxy..."
+        rm -rf "$small8_dir/luci-app-homeproxy"
+        if ! git clone --depth 1 "https://github.com/immortalwrt/homeproxy.git" "$small8_dir/luci-app-homeproxy"; then
+            echo "Error: failed to clone homeproxy repository" >&2
+            exit 1
+        fi
+    fi
+
+    if [ ! -d "$small8_dir/lucky" ] || [ ! -d "$small8_dir/luci-app-lucky" ]; then
+        echo "Restoring missing small8 packages: lucky / luci-app-lucky..."
+        clone_sparse_repo_packages "https://github.com/gdy666/luci-app-lucky.git" "$small8_dir" lucky luci-app-lucky
+    fi
+}
+
 install_small8() {
-    # 注意：已移除 mosdns luci-app-mosdns quickstart luci-app-quickstart luci-app-istorex luci-app-store taskd luci-lib-taskd
-    # 这些包不需要，由 disable_packages.config 控制
-    ./scripts/feeds install -p small8 -f xray-core xray-plugin dns2tcp dns2socks haproxy hysteria \
-        naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata geoview v2ray-plugin \
-        tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev \
-        v2dat adguardhome luci-app-adguardhome ddns-go \
-        luci-app-ddns-go luci-lib-xterm luci-app-cloudflarespeedtest netdata luci-app-netdata \
-        lucky luci-app-lucky luci-app-openclash luci-app-homeproxy luci-app-amlogic nikki luci-app-nikki \
-        tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier \
-        msd_lite luci-app-msd_lite cups luci-app-cupsd smartdns luci-app-smartdns
+    local small8_install_packages=(
+        xray-core xray-plugin dns2tcp dns2socks haproxy hysteria
+        naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata geoview v2ray-plugin
+        tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev
+        v2dat adguardhome luci-app-adguardhome luci-lib-xterm luci-app-cloudflarespeedtest
+        netdata luci-app-netdata luci-app-openclash luci-app-amlogic tailscale luci-app-tailscale
+        oaf open-app-filter luci-app-oaf easytier luci-app-easytier msd_lite luci-app-msd_lite
+        cups luci-app-cupsd smartdns luci-app-smartdns
+    )
+
+    ./scripts/feeds install -p small8 -f "${small8_install_packages[@]}"
 }
 
 install_passwall() {

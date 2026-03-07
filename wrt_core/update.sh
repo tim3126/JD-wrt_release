@@ -39,6 +39,7 @@ main() {
     clean_up
     reset_feeds_conf
     update_feeds
+    restore_missing_small8_packages
     remove_unwanted_packages
     remove_tweaked_packages
     update_homeproxy
@@ -67,6 +68,9 @@ main() {
     update_mosdns_deconfig
     fix_quickstart
     update_oaf_deconfig
+    fix_oaf_kernel_compat
+    fix_oaf_init
+    add_service_default_policies
     add_timecontrol
     add_ddnsgo_uci_defaults
     add_nikki_proxy_defaults
@@ -87,6 +91,7 @@ main() {
     install_feeds
     fix_easytier_lua
     update_adguardhome
+    patch_dockerman_ui
     update_script_priority
     update_geoip
     fix_openssl_ktls

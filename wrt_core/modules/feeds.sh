@@ -2,16 +2,16 @@
 
 update_feeds() {
     local FEEDS_PATH="$BUILD_DIR/$FEEDS_CONF"
+    local SMALL8_REPO="https://gitee.com/aiyboy/small-package.git"
     if [[ -f "$BUILD_DIR/feeds.conf" ]]; then
         FEEDS_PATH="$BUILD_DIR/feeds.conf"
     fi
     sed -i '/^#/d' "$FEEDS_PATH"
     sed -i '/packages_ext/d' "$FEEDS_PATH"
+    sed -i '/^src-git small8 /d' "$FEEDS_PATH"
 
-    if ! grep -q "small-package" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo "src-git small8 https://github.com/kenzok8/small-package" >>"$FEEDS_PATH"
-    fi
+    [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
+    echo "src-git small8 $SMALL8_REPO" >>"$FEEDS_PATH"
 
     if ! grep -q "openwrt-passwall" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"

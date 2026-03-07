@@ -437,6 +437,160 @@ EOF
     fi
 }
 
+fix_oaf_kernel_compat() {
+    local source_paths=(
+        "$BUILD_DIR/feeds/small8/oaf/src/app_filter.c"
+        "$BUILD_DIR/package/feeds/small8/oaf/src/app_filter.c"
+    )
+    local makefile_paths=(
+        "$BUILD_DIR/feeds/small8/oaf/Makefile"
+        "$BUILD_DIR/package/feeds/small8/oaf/Makefile"
+    )
+
+    for source_path in "${source_paths[@]}"; do
+        [ -f "$source_path" ] || continue
+
+        python - "$source_path" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+for name in [
+    "__add_app_feature",
+    "add_app_feature",
+    "af_init_feature",
+    "load_feature_buf_from_file",
+    "load_feature_config",
+    "parse_flow_base",
+    "parse_https_proto",
+    "parse_http_proto",
+    "af_match_by_pos",
+    "af_match_by_url",
+    "af_match_one",
+    "app_filter_match",
+    "__af_update_client_app_info",
+    "af_update_client_app_info",
+    "TEST_cJSON",
+    "init_oaf_timer",
+    "fini_oaf_timer",
+    "netlink_oaf_init",
+]:
+    text = text.replace(f"\nint {name}(", f"\nstatic int {name}(")
+    text = text.replace(f"\nvoid {name}(", f"\nstatic void {name}(")
+
+text = text.replace(
+    "\tmm_segment_t fs;\n",
+    "#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,7,19)\n\tmm_segment_t fs;\n#endif\n",
+    1,
+)
+text = text.replace(
+    "\tif (size == 0) {\n\t\treturn;\n\t}\n",
+    "\tif (size == 0) {\n\t\tfilp_close(fp, NULL);\n\t\treturn;\n\t}\n",
+    1,
+)
+text = text.replace("\tint i;\n\tint index = -1;\n", "\tint index = -1;\n", 1)
+text = text.replace("\tint found = 0;\n", "", 1)
+text = text.replace("\tint i;\n\tint index = 0;\n", "", 1)
+text = text.replace("\tstatic int bytes1 = 0;\n", "", 1)
+text = text.replace("\tunsigned long long total_packets = 0;\n", "", 1)
+text = text.replace("time=%d action=%s, %d/%d\\n", "time=%lu action=%s, %d/%d\\n", 1)
+
+path.write_text(text, encoding="utf-8", newline="\n")
+PY
+    done
+
+    for makefile_path in "${makefile_paths[@]}"; do
+        [ -f "$makefile_path" ] || continue
+        if ! grep -q 'Wno-error=missing-prototypes' "$makefile_path"; then
+            sed -i 's|EXTRA_CFLAGS="$(EXTRA_CFLAGS)"|EXTRA_CFLAGS="$(EXTRA_CFLAGS) -Wno-error=missing-prototypes -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=format"|' "$makefile_path"
+        fi
+    done
+}
+
+
+fix_oaf_init() {
+    local init_paths=(
+        "$BUILD_DIR/feeds/small8/open-app-filter/files/appfilter.init"
+        "$BUILD_DIR/package/feeds/small8/open-app-filter/files/appfilter.init"
+    )
+
+    for init_path in "${init_paths[@]}"; do
+        [ -f "$init_path" ] || continue
+
+        if grep -q '/proc/sys/oaf' "$init_path"; then
+            continue
+        fi
+
+        awk '
+        /^[[:space:]]*insmod oaf[[:space:]]*$/ {
+            indent = substr($0, 1, match($0, /[^ 	]/) - 1)
+            print indent "modprobe oaf 2>/dev/null || insmod /lib/modules/$(uname -r)/oaf.ko"
+            print indent "[ -d /proc/sys/oaf ] || return 1"
+            next
+        }
+        { print }
+        ' "$init_path" >"$init_path.tmp" && mv "$init_path.tmp" "$init_path"
+    done
+}
+
+add_service_default_policies() {
+    local uci_defaults_dir="$BUILD_DIR/package/base-files/files/etc/uci-defaults"
+    local script_path="$uci_defaults_dir/993_service_defaults"
+
+    mkdir -p "$uci_defaults_dir"
+
+    cat >"$script_path" <<'EOF'
+#!/bin/sh
+
+# Keep service packages installed but disabled by default
+if uci -q get smartdns.@smartdns[0] >/dev/null 2>&1; then
+    uci -q set smartdns.@smartdns[0].enabled='0'
+    uci -q commit smartdns
+    /etc/init.d/smartdns disable 2>/dev/null
+    /etc/init.d/smartdns stop 2>/dev/null
+fi
+
+if uci -q get cupsd.config >/dev/null 2>&1; then
+    uci -q set cupsd.config.enabled='0'
+    uci -q commit cupsd
+    /etc/init.d/cupsd disable 2>/dev/null
+    /etc/init.d/cupsd stop 2>/dev/null
+fi
+
+if uci -q get dockerd.globals >/dev/null 2>&1; then
+    uci -q set dockerd.globals.auto_start='0'
+    uci -q commit dockerd
+    /etc/init.d/dockerd disable 2>/dev/null
+    /etc/init.d/dockerd stop 2>/dev/null
+    /etc/init.d/dockerman disable 2>/dev/null
+    /etc/init.d/dockerman stop 2>/dev/null
+fi
+
+exit 0
+EOF
+
+    chmod +x "$script_path"
+}
+
+patch_dockerman_ui() {
+    local source_root=""
+
+    if [ -d "$BUILD_DIR/feeds/luci/applications/luci-app-dockerman" ]; then
+        source_root="$BUILD_DIR/feeds/luci/applications/luci-app-dockerman"
+    elif [ -d "$BUILD_DIR/package/feeds/luci/luci-app-dockerman" ]; then
+        source_root="$BUILD_DIR/package/feeds/luci/luci-app-dockerman"
+    else
+        return
+    fi
+
+    install -Dm644 "$BASE_PATH/patches/dockerman/configuration.lua" \
+        "$source_root/luasrc/model/cbi/dockerman/configuration.lua"
+    install -Dm644 "$BASE_PATH/patches/dockerman/overview.lua" \
+        "$source_root/luasrc/model/cbi/dockerman/overview.lua"
+}
+
 update_geoip() {
     local geodata_path="$BUILD_DIR/package/feeds/small8/v2ray-geodata/Makefile"
     if [ -d "${geodata_path%/*}" ] && [ -f "$geodata_path" ]; then
