@@ -503,8 +503,8 @@ PY
 
     for makefile_path in "${makefile_paths[@]}"; do
         [ -f "$makefile_path" ] || continue
-        if ! grep -q 'Wno-error=missing-prototypes' "$makefile_path"; then
-            sed -i 's|EXTRA_CFLAGS="$(EXTRA_CFLAGS)"|EXTRA_CFLAGS="$(EXTRA_CFLAGS) -Wno-error=missing-prototypes -Wno-error=unused-variable -Wno-error=unused-function -Wno-error=format"|' "$makefile_path"
+        if ! grep -q 'Wno-error' "$makefile_path"; then
+            sed -i 's|EXTRA_CFLAGS="$(EXTRA_CFLAGS)"|EXTRA_CFLAGS="$(EXTRA_CFLAGS) -Wno-error"|' "$makefile_path"
         fi
     done
 }

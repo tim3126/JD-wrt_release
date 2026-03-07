@@ -377,14 +377,17 @@ update_diskman() {
 add_quickfile() {
     local repo_url="https://github.com/sbwml/luci-app-quickfile.git"
     local target_dir="$BUILD_DIR/package/emortal/quickfile"
+    # Pin to v1.0.9 commit - v1.0.10 source tarball not yet available upstream
+    local QUICKFILE_COMMIT="5d863b9"
     if [ -d "$target_dir" ]; then
         rm -rf "$target_dir"
     fi
     echo "正在添加 luci-app-quickfile..."
-    if ! git clone --depth 1 "$repo_url" "$target_dir"; then
+    if ! git clone "$repo_url" "$target_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-quickfile 仓库失败" >&2
         exit 1
     fi
+    git -C "$target_dir" checkout "$QUICKFILE_COMMIT"
 
     local makefile_path="$target_dir/quickfile/Makefile"
     if [ -f "$makefile_path" ]; then
