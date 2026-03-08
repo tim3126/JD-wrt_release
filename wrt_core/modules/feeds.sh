@@ -4,6 +4,7 @@ prepare_small8_feed() {
     local local_feeds_root="$BUILD_DIR/.customfeeds"
     local local_small8_dir="$local_feeds_root/small8"
     local small8_repos=(
+        "https://github.com/kenzok8/jell.git"
         "https://github.com/kenzok8/small-package.git"
         "https://gitee.com/aiyboy/small-package.git"
     )

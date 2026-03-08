@@ -33,6 +33,8 @@ source "$SCRIPT_DIR/modules/general.sh"
 source "$SCRIPT_DIR/modules/feeds.sh"
 source "$SCRIPT_DIR/modules/packages.sh"
 source "$SCRIPT_DIR/modules/system.sh"
+source "$SCRIPT_DIR/modules/cups.sh"
+
 
 main() {
     clone_repo
@@ -48,6 +50,8 @@ main() {
     update_golang
     change_dnsmasq2full
     fix_mk_def_depends
+
+    install_libubox_cmake_patch
     update_default_lan_addr
     remove_something_nss_kmod
     update_affinity_script
@@ -74,7 +78,6 @@ main() {
     add_timecontrol
     add_ddnsgo_uci_defaults
     add_nikki_proxy_defaults
-    # add_gecoosac  # 太乙ER1无WiFi，不需要集客AC控制器
     add_quickfile
     update_lucky
     fix_rust_compile_error
@@ -89,6 +92,7 @@ main() {
     remove_attendedsysupgrade
     fix_kconfig_recursive_dependency
     install_feeds
+    fix_cups_libcups_avahi_depends
     fix_easytier_lua
     update_adguardhome
     patch_dockerman_ui
