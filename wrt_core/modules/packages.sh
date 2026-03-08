@@ -142,6 +142,7 @@ install_small8() {
         oaf open-app-filter luci-app-oaf easytier luci-app-easytier msd_lite luci-app-msd_lite
         cups luci-app-cupsd smartdns luci-app-smartdns
         luci-app-homeproxy
+        ddns-go luci-app-ddns-go
     )
 
     ./scripts/feeds install -p small8 -f "${small8_install_packages[@]}"
