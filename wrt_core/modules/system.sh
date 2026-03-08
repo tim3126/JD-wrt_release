@@ -442,10 +442,23 @@ fix_oaf_kernel_compat() {
         "$BUILD_DIR/feeds/small8/oaf/src/app_filter.c"
         "$BUILD_DIR/package/feeds/small8/oaf/src/app_filter.c"
     )
+    local config_source_paths=(
+        "$BUILD_DIR/feeds/small8/oaf/src/app_filter_config.c"
+        "$BUILD_DIR/package/feeds/small8/oaf/src/app_filter_config.c"
+    )
     local makefile_paths=(
         "$BUILD_DIR/feeds/small8/oaf/Makefile"
         "$BUILD_DIR/package/feeds/small8/oaf/Makefile"
     )
+
+    # Fix app_filter_config.c: class_create API changed in kernel 6.4+
+    for config_path in "${config_source_paths[@]}"; do
+        [ -f "$config_path" ] || continue
+        if grep -q 'class_create(THIS_MODULE' "$config_path"; then
+            sed -i 's/class_create(THIS_MODULE, *\(.*\))/class_create(\1)/' "$config_path"
+            echo "已修复 $config_path 中的 class_create API (6.4+ 兼容)"
+        fi
+    done
 
     for source_path in "${source_paths[@]}"; do
         [ -f "$source_path" ] || continue
