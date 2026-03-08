@@ -11,6 +11,7 @@ on:
         default: jdcloud_er1_libwrt
         options:
           - jdcloud_er1_libwrt
+          - zn_m2_libwrt
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

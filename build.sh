@@ -59,8 +59,10 @@ apply_config() {
     # 添加编译基础配置
     cat "$BASE_PATH/deconfig/compile_base.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
 
-    # 添加 Docker 依赖
-    cat "$BASE_PATH/deconfig/docker_deps.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    # 添加 Docker 依赖（仅当设备配置启用了 dockerman）
+    if grep -q "CONFIG_PACKAGE_luci-app-dockerman=y" "$CONFIG_FILE"; then
+        cat "$BASE_PATH/deconfig/docker_deps.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    fi
 
     # 最后加载禁用配置（确保禁用设置生效）
     if [ -f "$BASE_PATH/deconfig/disable_packages.config" ]; then
