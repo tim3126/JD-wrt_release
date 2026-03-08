@@ -507,7 +507,6 @@ text = text.replace("\tint i;\n\tint index = -1;\n", "\tint index = -1;\n", 1)
 text = text.replace("\tint found = 0;\n", "", 1)
 text = text.replace("\tint i;\n\tint index = 0;\n", "", 1)
 text = text.replace("\tstatic int bytes1 = 0;\n", "", 1)
-text = text.replace("\tunsigned long long total_packets = 0;\n", "", 1)
 text = text.replace("time=%d action=%s, %d/%d\\n", "time=%lu action=%s, %d/%d\\n", 1)
 
 path.write_text(text, encoding="utf-8", newline="\n")
