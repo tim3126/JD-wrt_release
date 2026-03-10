@@ -110,6 +110,11 @@ main() {
     update_package "docker" "tags" "v28.5.2"
     update_package "dockerd" "releases" "v28.5.2"
     # apply_hash_fixes
+
+    # 保存 feed 版本快照: 首次构建(无锁)或明确要求更新时
+    if [ "${UPDATE_FEEDS:-0}" = "1" ] || ! has_feed_locks; then
+        save_feed_locks
+    fi
 }
 
 main "$@"

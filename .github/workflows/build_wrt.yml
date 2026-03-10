@@ -11,9 +11,15 @@ on:
         default: jdcloud_er1_libwrt
         options:
           - jdcloud_er1_libwrt
+      update_feeds:
+        required: false
+        description: 'Update Feeds (忽略锁定，拉取最新并保存)'
+        type: boolean
+        default: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  UPDATE_FEEDS: ${{ inputs.update_feeds && '1' || '0' }}
 
 jobs:
   build:
@@ -68,6 +74,8 @@ jobs:
 
       - name: Build Firmware
         run: ./build.sh ${{ inputs.model }}
+        env:
+          UPDATE_FEEDS: ${{ env.UPDATE_FEEDS }}
 
       - name: Delete Old Cache
         run: |
@@ -88,6 +96,21 @@ jobs:
           echo "=============================================="
           df -h
           echo "=============================================="
+
+      - name: Commit Feed Locks
+        if: always()
+        run: |
+          if git diff --quiet wrt_core/feed_locks.ini 2>/dev/null; then
+            echo "feed_locks.ini 无变化，跳过提交"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add wrt_core/feed_locks.ini
+            git commit -m "chore: update feed locks [auto]
+
+            Co-Authored-By: Oz <oz-agent@warp.dev>"
+            git push
+          fi
 
       - name: Upload Firmware
         uses: actions/upload-artifact@v6
