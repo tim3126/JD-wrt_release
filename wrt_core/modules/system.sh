@@ -824,6 +824,39 @@ config include\\
     fi
 }
 
+fix_pbr_version_mismatch() {
+    local pbr_init="$BUILD_DIR/feeds/packages/net/pbr/files/etc/init.d/pbr"
+    local luci_rpcd="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/root/usr/libexec/rpcd/luci.pbr"
+    local luci_status_js="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/htdocs/luci-static/resources/pbr/status.js"
+
+    [ -f "$pbr_init" ] || return 0
+
+    # 从 pbr init.d 提取 packageCompat 值作为基准
+    local pkg_compat
+    pkg_compat=$(grep -oP "packageCompat='\K[0-9]+" "$pbr_init" 2>/dev/null)
+    [ -n "$pkg_compat" ] || return 0
+
+    # 同步 rpcd compat
+    if [ -f "$luci_rpcd" ]; then
+        local rpcd_compat
+        rpcd_compat=$(grep -oP "rpcdCompat='\K[0-9]+" "$luci_rpcd" 2>/dev/null)
+        if [ -n "$rpcd_compat" ] && [ "$rpcd_compat" != "$pkg_compat" ]; then
+            sed -i "s/rpcdCompat='${rpcd_compat}'/rpcdCompat='${pkg_compat}'/" "$luci_rpcd"
+            echo "PBR: rpcd compat ${rpcd_compat} -> ${pkg_compat}"
+        fi
+    fi
+
+    # 同步 LuCI JS compat (getter 跨多行，用 sed 提取)
+    if [ -f "$luci_status_js" ]; then
+        local luci_compat
+        luci_compat=$(sed -n '/LuciCompat/,/return/{s/.*return \+\([0-9]\+\).*/\1/p}' "$luci_status_js" 2>/dev/null)
+        if [ -n "$luci_compat" ] && [ "$luci_compat" != "$pkg_compat" ]; then
+            sed -i "/LuciCompat/,/return/{s/return ${luci_compat}/return ${pkg_compat}/}" "$luci_status_js"
+            echo "PBR: LuCI compat ${luci_compat} -> ${pkg_compat}"
+        fi
+    fi
+}
+
 fix_quectel_cm() {
     local makefile_path="$BUILD_DIR/package/feeds/packages/quectel-cm/Makefile"
     local cmake_patch_path="$BUILD_DIR/package/feeds/packages/quectel-cm/patches/020-cmake.patch"
