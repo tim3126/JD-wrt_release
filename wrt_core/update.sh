@@ -92,6 +92,7 @@ main() {
     remove_attendedsysupgrade
     fix_kconfig_recursive_dependency
     install_feeds
+    fix_smartdns_default_state
     fix_cups_libcups_avahi_depends
     fix_easytier_lua
     update_adguardhome

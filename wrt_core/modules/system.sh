@@ -302,11 +302,6 @@ update_menu_location() {
         sed -i 's/adminrvices/admin\/services/g' "$pbr_path"
     fi
 
-    # 修复 timecontrol 菜单路径 (admin/control -> admin/services)
-    local timecontrol_path="$BUILD_DIR/package/luci-app-timecontrol/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
-    if [ -d "$(dirname "$timecontrol_path")" ] && [ -f "$timecontrol_path" ]; then
-        sed -i 's/admin\/control/admin\/services/g' "$timecontrol_path"
-    fi
 }
 
 # 添加 ddns-go UCI 默认配置并修复 init.d 脚本 bug
@@ -556,21 +551,26 @@ add_service_default_policies() {
     cat >"$script_path" <<'EOF'
 #!/bin/sh
 
-# Keep service packages installed but disabled by default
-if uci -q get smartdns.@smartdns[0] >/dev/null 2>&1; then
-    uci -q set smartdns.@smartdns[0].enabled='0'
-    uci -q commit smartdns
-    /etc/init.d/smartdns disable 2>/dev/null
-    /etc/init.d/smartdns stop 2>/dev/null
+# SmartDNS: 确保配置节存在，然后强制禁用
+[ -f /etc/config/smartdns ] || touch /etc/config/smartdns
+uci -q get smartdns.@smartdns[0] >/dev/null 2>&1 || uci add smartdns smartdns >/dev/null 2>&1
+uci -q set smartdns.@smartdns[0].enabled='0'
+uci -q commit smartdns
+/etc/init.d/smartdns disable 2>/dev/null
+
+# SmartDNS: 修补 init START 优先级 (19→94)
+if [ -f /etc/init.d/smartdns ]; then
+    sed -i 's/^START=19$/START=94/' /etc/init.d/smartdns
 fi
 
+# CUPS
 if uci -q get cupsd.config >/dev/null 2>&1; then
     uci -q set cupsd.config.enabled='0'
     uci -q commit cupsd
     /etc/init.d/cupsd disable 2>/dev/null
-    /etc/init.d/cupsd stop 2>/dev/null
 fi
 
+# Docker
 if uci -q get dockerd.globals >/dev/null 2>&1; then
     uci -q set dockerd.globals.auto_start='0'
     uci -q commit dockerd
@@ -584,6 +584,42 @@ exit 0
 EOF
 
     chmod +x "$script_path"
+}
+
+# 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
+fix_smartdns_default_state() {
+    local found=0
+
+    # 动态查找 SmartDNS 默认配置文件
+    while IFS= read -r cfg; do
+        if grep -q "option enabled '1'" "$cfg"; then
+            sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
+            echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
+
+    # 动态查找 SmartDNS init 脚本，修补 START 优先级
+    while IFS= read -r init; do
+        if grep -q '^START=19$' "$init"; then
+            sed -i 's/^START=19$/START=94/' "$init"
+            echo "已修补 SmartDNS init START=19 -> 94: $init"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
+
+    # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
+    while IFS= read -r mk; do
+        if grep -q '/etc/init.d/smartdns enable' "$mk"; then
+            sed -i '/\/etc\/init.d\/smartdns enable/d' "$mk"
+            echo "已从 Makefile 移除 smartdns enable: $mk"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
+
+    if [ "$found" -eq 0 ]; then
+        echo "Warning: 未找到任何 SmartDNS 文件可修补" >&2
+    fi
 }
 
 patch_dockerman_ui() {
