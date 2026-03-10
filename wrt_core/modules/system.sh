@@ -544,7 +544,7 @@ fix_oaf_init() {
 
 add_service_default_policies() {
     local uci_defaults_dir="$BUILD_DIR/package/base-files/files/etc/uci-defaults"
-    local script_path="$uci_defaults_dir/993_service_defaults"
+    local script_path="$uci_defaults_dir/zzz_service_defaults"
 
     mkdir -p "$uci_defaults_dir"
 
@@ -590,14 +590,20 @@ EOF
 fix_smartdns_default_state() {
     local found=0
 
-    # 动态查找 SmartDNS 默认配置文件
+    # Debug: 列出所有 smartdns 相关目录
+    echo "[SmartDNS] 搜索目录: $BUILD_DIR"
+    find -L "$BUILD_DIR" -maxdepth 6 -type d -name "smartdns" 2>/dev/null | while read -r d; do
+        echo "[SmartDNS] 发现目录: $d"
+    done
+
+    # 动态查找 SmartDNS 默认配置文件 (-L 穿透符号链接)
     while IFS= read -r cfg; do
         if grep -q "option enabled '1'" "$cfg"; then
             sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
             echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
             found=$((found + 1))
         fi
-    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
+    done < <(find -L "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
 
     # 动态查找 SmartDNS init 脚本，修补 START 优先级
     while IFS= read -r init; do
@@ -606,7 +612,7 @@ fix_smartdns_default_state() {
             echo "已修补 SmartDNS init START=19 -> 94: $init"
             found=$((found + 1))
         fi
-    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
+    done < <(find -L "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
 
     # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
     while IFS= read -r mk; do
@@ -615,10 +621,22 @@ fix_smartdns_default_state() {
             echo "已从 Makefile 移除 smartdns enable: $mk"
             found=$((found + 1))
         fi
-    done < <(find "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
+    done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
 
     if [ "$found" -eq 0 ]; then
-        echo "Warning: 未找到任何 SmartDNS 文件可修补" >&2
+        echo "Warning: 未找到任何 SmartDNS 文件可修补，尝试宽搜索..." >&2
+        # 宽搜索: 查找任何名为 smartdns 的 init 脚本
+        while IFS= read -r init; do
+            if grep -q '^START=19$' "$init"; then
+                sed -i 's/^START=19$/START=94/' "$init"
+                echo "已修补 SmartDNS init (宽搜索) START=19 -> 94: $init"
+                found=$((found + 1))
+            fi
+        done < <(find -L "$BUILD_DIR" -name "smartdns" -path "*/init.d/*" -type f 2>/dev/null)
+    fi
+
+    if [ "$found" -eq 0 ]; then
+        echo "Warning: 宽搜索仍未找到 SmartDNS 文件" >&2
     fi
 }
 
