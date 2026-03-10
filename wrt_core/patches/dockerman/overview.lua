@@ -28,7 +28,7 @@ m.submit=false
 m.reset=false
 
 if local_daemon_missing then
-	m.message = translate("Docker 服务未启动，请先在“系统 → 启动项”中启用并启动 dockerd。")
+	m.message = translate("Docker 服务未启动，请点击下方“启动”按钮启动 Docker。")
 end
 
 local docker_info_table = {}
@@ -62,13 +62,13 @@ if nixio.fs.access("/usr/bin/dockerd") and not remote_endpoint then
 		docker:clear_status()
 
 		if lost_state then
-			docker:append_status("Docker daemon: starting")
-			luci.util.exec("/etc/init.d/dockerd start")
-			luci.util.exec("sleep 5")
-			luci.util.exec("/etc/init.d/dockerman start")
+			docker:append_status("Docker daemon: starting...")
+			-- 异步启动 Docker，避免阻塞 LuCI 导致页面卡死
+			os.execute("/etc/init.d/dockerd start >/dev/null 2>&1 &")
+			os.execute("(sleep 8 && /etc/init.d/dockerman start) >/dev/null 2>&1 &")
 		else
-			docker:append_status("Docker daemon: stopping")
-			luci.util.exec("/etc/init.d/dockerd stop")
+			docker:append_status("Docker daemon: stopping...")
+			os.execute("/etc/init.d/dockerd stop >/dev/null 2>&1 &")
 		end
 		docker:clear_status()
 		luci.http.redirect(luci.dispatcher.build_url("admin/docker/overview"))
@@ -81,10 +81,10 @@ if nixio.fs.access("/usr/bin/dockerd") and not remote_endpoint then
 	o.forcewrite = true
 	o.write = function(self, section)
 		docker:clear_status()
-		docker:append_status("Docker daemon: restarting")
-		luci.util.exec("/etc/init.d/dockerd restart")
-		luci.util.exec("sleep 5")
-		luci.util.exec("/etc/init.d/dockerman start")
+		docker:append_status("Docker daemon: restarting...")
+		-- 异步重启，避免阻塞 LuCI
+		os.execute("/etc/init.d/dockerd restart >/dev/null 2>&1 &")
+		os.execute("(sleep 8 && /etc/init.d/dockerman start) >/dev/null 2>&1 &")
 		docker:clear_status()
 		luci.http.redirect(luci.dispatcher.build_url("admin/docker/overview"))
 	end

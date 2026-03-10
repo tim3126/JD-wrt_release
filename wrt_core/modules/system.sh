@@ -302,11 +302,6 @@ update_menu_location() {
         sed -i 's/adminrvices/admin\/services/g' "$pbr_path"
     fi
 
-    # 修复 timecontrol 菜单路径 (admin/control -> admin/services)
-    local timecontrol_path="$BUILD_DIR/package/luci-app-timecontrol/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
-    if [ -d "$(dirname "$timecontrol_path")" ] && [ -f "$timecontrol_path" ]; then
-        sed -i 's/admin\/control/admin\/services/g' "$timecontrol_path"
-    fi
 }
 
 # 添加 ddns-go UCI 默认配置并修复 init.d 脚本 bug
@@ -556,34 +551,121 @@ add_service_default_policies() {
     cat >"$script_path" <<'EOF'
 #!/bin/sh
 
-# Keep service packages installed but disabled by default
-if uci -q get smartdns.@smartdns[0] >/dev/null 2>&1; then
-    uci -q set smartdns.@smartdns[0].enabled='0'
-    uci -q commit smartdns
-    /etc/init.d/smartdns disable 2>/dev/null
-    /etc/init.d/smartdns stop 2>/dev/null
+# SmartDNS: 确保配置节存在，然后强制禁用
+[ -f /etc/config/smartdns ] || touch /etc/config/smartdns
+uci -q get smartdns.@smartdns[0] >/dev/null 2>&1 || uci add smartdns smartdns >/dev/null 2>&1
+uci -q set smartdns.@smartdns[0].enabled='0'
+uci -q commit smartdns
+/etc/init.d/smartdns disable 2>/dev/null
+
+# SmartDNS: 修补 init START 优先级 (19→94)，避免在 uci-defaults 之前运行
+if [ -f /etc/init.d/smartdns ]; then
+    sed -i 's/^START=19$/START=94/' /etc/init.d/smartdns
 fi
 
+# CUPS
 if uci -q get cupsd.config >/dev/null 2>&1; then
     uci -q set cupsd.config.enabled='0'
     uci -q commit cupsd
     /etc/init.d/cupsd disable 2>/dev/null
-    /etc/init.d/cupsd stop 2>/dev/null
 fi
 
-if uci -q get dockerd.globals >/dev/null 2>&1; then
-    uci -q set dockerd.globals.auto_start='0'
-    uci -q commit dockerd
-    /etc/init.d/dockerd disable 2>/dev/null
-    /etc/init.d/dockerd stop 2>/dev/null
-    /etc/init.d/dockerman disable 2>/dev/null
-    /etc/init.d/dockerman stop 2>/dev/null
+# Docker: 保持默认启用，用于部署项目
+
+# Docker Events: 修复 uwsgi worker 耗尽导致 LuCI 卡死
+# 根因: Docker events 是流式 API, 每次调用会长时间占用一个 uwsgi worker
+#       events.js 页面加载时 load()+renderEventsTable() 同时发起调用,
+#       占满全部 2 个 uwsgi worker → nginx upstream timeout → 整个 LuCI UI 冻结
+# 修复: 页面加载时不发起任何 Docker events 调用, 用户通过过滤器手动触发
+EVENTS_JS="/www/luci-static/resources/view/dockerman/events.js"
+if [ -f "$EVENTS_JS" ]; then
+    # 1) load(): 移除 dm2.docker_events() 阻塞调用, 返回空结果
+    sed -i 's|dm2\.docker_events([^)]*)|Promise.resolve({code:200,body:[]})|' "$EVENTS_JS"
+    # 2) render(): 移除自动调用 renderEventsTable, 避免页面加载时发起流式请求
+    sed -i 's|this\.renderEventsTable(event_list)|void 0|' "$EVENTS_JS"
+    # 3) From 日期选择器默认值: 1970-01-01 → 1小时前
+    sed -i "s|'value':[ ]*'1970-01-01T00:00'|'value':new Date(Date.now()-3600000).toISOString().slice(0,16)|" "$EVENTS_JS"
+    # 4) renderEventsTable() 中 since 默认回退: '0' → 1小时前 (用户触发时生效)
+    sed -i "s|let since[ ]*=[ ]*'0'|let since=Math.floor((Date.now()-3600000)/1000).toString()|" "$EVENTS_JS"
+    # 5) 手动过滤触发: 短路 executeDockerAction(dm2.docker_events), 渲染空表
+    sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$EVENTS_JS"
 fi
 
 exit 0
 EOF
 
     chmod +x "$script_path"
+}
+
+# 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
+fix_smartdns_default_state() {
+    local found=0
+
+    # 动态查找 SmartDNS 默认配置文件
+    while IFS= read -r cfg; do
+        if grep -q "option enabled '1'" "$cfg"; then
+            sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
+            echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
+
+    # 动态查找 SmartDNS init 脚本，修补 START 优先级
+    while IFS= read -r init; do
+        if grep -q '^START=19$' "$init"; then
+            sed -i 's/^START=19$/START=94/' "$init"
+            echo "已修补 SmartDNS init START=19 -> 94: $init"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
+
+    # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
+    while IFS= read -r mk; do
+        if grep -q '/etc/init.d/smartdns enable' "$mk"; then
+            sed -i '/\/etc\/init.d\/smartdns enable/d' "$mk"
+            echo "已从 Makefile 移除 smartdns enable: $mk"
+            found=$((found + 1))
+        fi
+    done < <(find "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
+
+    if [ "$found" -eq 0 ]; then
+        echo "Warning: 未找到任何 SmartDNS 文件可修补" >&2
+    fi
+}
+
+# 限制 QuickFile 和 Docker 的内存/CPU 占用
+fix_service_resource_limits() {
+    # --- QuickFile: Go 二进制，优化 GC 策略和资源限制 ---
+    # 注意: Go 程序的 VSZ (虚拟内存) 通常超过 1GB，这是 Go 运行时预留地址空间的正常行为，
+    # 实际物理内存占用 (RSS) 远小于 VSZ。以下优化可进一步控制 GC 行为。
+    local qf_init_paths=(
+        "$BUILD_DIR/package/emortal/quickfile/quickfile/files/quickfile.init"
+    )
+
+    for init in "${qf_init_paths[@]}"; do
+        [ -f "$init" ] || continue
+        if grep -q 'GOMEMLIMIT' "$init"; then
+            continue
+        fi
+        # GOMEMLIMIT=256MiB: Go GC 软上限，堆超过 256MB 后 GC 激进回收
+        sed -i '/procd_set_param respawn/a\    procd_set_param env GOMEMLIMIT=256MiB' "$init"
+        # 移除不必要的 core=unlimited
+        sed -i '/procd_set_param limits core="unlimited"/d' "$init"
+        # 将 nofile 降到合理值
+        sed -i 's/procd_set_param limits nofile="200000 200000"/procd_set_param limits nofile="8192 8192"/' "$init"
+        echo "已为 QuickFile 优化 Go GC 策略 (GOMEMLIMIT=256MiB)"
+    done
+
+    # --- Docker: 限制 dockerd OOM 优先级，保护路由核心服务 ---
+    while IFS= read -r init; do
+        if grep -q 'oom_score_adj' "$init"; then
+            continue
+        fi
+        # OOM 得分 500: 内存不足时优先杀 docker，保护路由核心
+        sed -i '/procd_close_instance/i\        procd_set_param oom_score_adj 500' "$init"
+        sed -i '/procd_close_instance/i\        procd_set_param limits nofile="8192 8192"' "$init"
+        echo "已为 dockerd 添加 OOM 保护 (oom_score_adj=500)"
+    done < <(find "$BUILD_DIR" -path "*/dockerd/files/dockerd.init" -type f 2>/dev/null)
 }
 
 patch_dockerman_ui() {
@@ -601,6 +683,22 @@ patch_dockerman_ui() {
         "$source_root/luasrc/model/cbi/dockerman/configuration.lua"
     install -Dm644 "$BASE_PATH/patches/dockerman/overview.lua" \
         "$source_root/luasrc/model/cbi/dockerman/overview.lua"
+
+    # 修复事件页: Docker events 流式 API 占满 uwsgi worker 导致 LuCI 卡死
+    local events_js="$source_root/htdocs/luci-static/resources/view/dockerman/events.js"
+    if [ -f "$events_js" ]; then
+        # 1) load(): 移除 dm2.docker_events() 阻塞调用, 返回空结果
+        sed -i "s|dm2\.docker_events([^)]*)|Promise.resolve({code: 200, body: []})|" "$events_js"
+        # 2) render(): 移除自动调用 renderEventsTable, 避免页面加载时发起流式请求
+        sed -i 's|this\.renderEventsTable(event_list)|void 0|' "$events_js"
+        # 3) From 日期选择器默认值: 1970-01-01 → 1小时前
+        sed -i "s/'value': '1970-01-01T00:00'/'value': new Date(Date.now() - 3600000).toISOString().slice(0, 16)/" "$events_js"
+        # 4) renderEventsTable() 中 since 默认回退: '0' → 1小时前 (用户触发时生效)
+        sed -i "s/let since = '0'/let since = Math.floor((Date.now() - 3600000) \/ 1000).toString()/" "$events_js"
+        # 5) 手动过滤触发: 短路 executeDockerAction(dm2.docker_events), 渲染空表
+        sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$events_js"
+        echo "已修复 dockerman events.js: 禁止页面加载时自动查询Docker events"
+    fi
 }
 
 update_geoip() {

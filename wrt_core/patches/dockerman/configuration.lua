@@ -16,7 +16,7 @@ m = Map("dockerd",
 	translate("DockerMan is a simple docker manager client for LuCI"))
 
 if local_daemon_missing then
-	m.message = translate("Docker 服务未启动，请先在“系统 → 启动项”中启用并启动 dockerd。")
+	m.message = translate("Docker 服务未启动，请先在“概况”页面点击“启动”按钮启动 Docker。")
 end
 
 if nixio.fs.access("/usr/bin/dockerd") and not remote_endpoint then
