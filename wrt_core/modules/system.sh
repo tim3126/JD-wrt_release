@@ -575,50 +575,38 @@ EOF
 
 # 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
 fix_smartdns_default_state() {
-    local config_paths=(
-        "$BUILD_DIR/feeds/small8/smartdns/files/etc/config/smartdns"
-        "$BUILD_DIR/feeds/packages/net/smartdns/files/etc/config/smartdns"
-        "$BUILD_DIR/package/feeds/small8/smartdns/files/etc/config/smartdns"
-        "$BUILD_DIR/package/feeds/packages/smartdns/files/etc/config/smartdns"
-    )
+    local found=0
 
-    for cfg in "${config_paths[@]}"; do
-        [ -f "$cfg" ] || continue
+    # 动态查找 SmartDNS 默认配置文件
+    while IFS= read -r cfg; do
         if grep -q "option enabled '1'" "$cfg"; then
             sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
             echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+            found=$((found + 1))
         fi
-    done
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
 
-    # 修补 init 脚本 START 优先级，确保在 uci-defaults (S10boot) 之后运行
-    local init_paths=(
-        "$BUILD_DIR/feeds/small8/smartdns/files/etc/init.d/smartdns"
-        "$BUILD_DIR/feeds/packages/net/smartdns/files/etc/init.d/smartdns"
-        "$BUILD_DIR/package/feeds/small8/smartdns/files/etc/init.d/smartdns"
-        "$BUILD_DIR/package/feeds/packages/smartdns/files/etc/init.d/smartdns"
-    )
-
-    for init in "${init_paths[@]}"; do
-        [ -f "$init" ] || continue
+    # 动态查找 SmartDNS init 脚本，修补 START 优先级
+    while IFS= read -r init; do
         if grep -q '^START=19$' "$init"; then
             sed -i 's/^START=19$/START=94/' "$init"
             echo "已修补 SmartDNS init START=19 -> 94: $init"
+            found=$((found + 1))
         fi
-    done
+    done < <(find "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
 
-    # 从 Makefile 的 postinst 中移除 enable 调用，防止安装时创建 rc.d 符号链接
-    local makefile_paths=(
-        "$BUILD_DIR/feeds/small8/smartdns/Makefile"
-        "$BUILD_DIR/feeds/packages/net/smartdns/Makefile"
-    )
-
-    for mk in "${makefile_paths[@]}"; do
-        [ -f "$mk" ] || continue
+    # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
+    while IFS= read -r mk; do
         if grep -q '/etc/init.d/smartdns enable' "$mk"; then
             sed -i '/\/etc\/init.d\/smartdns enable/d' "$mk"
             echo "已从 Makefile 移除 smartdns enable: $mk"
+            found=$((found + 1))
         fi
-    done
+    done < <(find "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
+
+    if [ "$found" -eq 0 ]; then
+        echo "Warning: 未找到任何 SmartDNS 文件可修补" >&2
+    fi
 }
 
 # 限制 QuickFile 和 Docker 的内存/CPU 占用
@@ -645,13 +633,7 @@ fix_service_resource_limits() {
     done
 
     # --- Docker: 限制 dockerd OOM 优先级，保护路由核心服务 ---
-    local dockerd_init_paths=(
-        "$BUILD_DIR/feeds/packages/utils/dockerd/files/dockerd.init"
-        "$BUILD_DIR/package/feeds/packages/dockerd/files/dockerd.init"
-    )
-
-    for init in "${dockerd_init_paths[@]}"; do
-        [ -f "$init" ] || continue
+    while IFS= read -r init; do
         if grep -q 'oom_score_adj' "$init"; then
             continue
         fi
@@ -659,7 +641,7 @@ fix_service_resource_limits() {
         sed -i '/procd_close_instance/i\        procd_set_param oom_score_adj 500' "$init"
         sed -i '/procd_close_instance/i\        procd_set_param limits nofile="8192 8192"' "$init"
         echo "已为 dockerd 添加 OOM 保护 (oom_score_adj=500)"
-    done
+    done < <(find "$BUILD_DIR" -path "*/dockerd/files/dockerd.init" -type f 2>/dev/null)
 }
 
 patch_dockerman_ui() {
@@ -678,10 +660,13 @@ patch_dockerman_ui() {
     install -Dm644 "$BASE_PATH/patches/dockerman/overview.lua" \
         "$source_root/luasrc/model/cbi/dockerman/overview.lua"
 
-    # 修复事件页 XHR 超时：since='0' (从1970年查所有事件) 改为最近1小时
+    # 修复事件页 XHR 超时
     local events_js="$source_root/htdocs/luci-static/resources/view/dockerman/events.js"
     if [ -f "$events_js" ]; then
+        # load() 函数: since=`0` (所有历史事件) → 最近1小时
         sed -i "s/since: \`0\`/since: \`\${now - 3600}\`/" "$events_js"
+        # From 日期选择器默认值: 1970-01-01 → 1小时前 (动态计算)
+        sed -i "s/'value': '1970-01-01T00:00'/'value': new Date(Date.now() - 3600000).toISOString().slice(0, 16)/" "$events_js"
         echo "已修复 dockerman events.js 默认查询范围 (0 -> now-3600)"
     fi
 }
