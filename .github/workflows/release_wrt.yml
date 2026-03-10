@@ -54,8 +54,8 @@ jobs:
         uses: actions/cache@v5.0.2
         with:
           path: |
-            ./action_build/.ccache
             ./action_build/staging_dir
+            ./action_build/dl
           key: ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-${{ env.BUILD_DATE }}
           restore-keys: |
             ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-
@@ -79,8 +79,9 @@ jobs:
       - name: Cache Status
         run: |
           echo "========cache status========"
-          echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
-          echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
+          echo "staging: $(du -sh ./action_build/staging_dir 2>/dev/null | cut -f 1)"
+          echo "dl: $(du -sh ./action_build/dl 2>/dev/null | cut -f 1)"
+          echo "ccache: $(du -sh ./action_build/staging_dir/host/ccache 2>/dev/null | cut -f 1)"
 
       - name: Machine Information
         run: |
