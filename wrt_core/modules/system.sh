@@ -302,11 +302,6 @@ update_menu_location() {
         sed -i 's/adminrvices/admin\/services/g' "$pbr_path"
     fi
 
-    # 修复 timecontrol 菜单路径 (admin/control -> admin/services)
-    local timecontrol_path="$BUILD_DIR/package/luci-app-timecontrol/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
-    if [ -d "$(dirname "$timecontrol_path")" ] && [ -f "$timecontrol_path" ]; then
-        sed -i 's/admin\/control/admin\/services/g' "$timecontrol_path"
-    fi
 }
 
 # 添加 ddns-go UCI 默认配置并修复 init.d 脚本 bug
@@ -556,34 +551,115 @@ add_service_default_policies() {
     cat >"$script_path" <<'EOF'
 #!/bin/sh
 
-# Keep service packages installed but disabled by default
-if uci -q get smartdns.@smartdns[0] >/dev/null 2>&1; then
-    uci -q set smartdns.@smartdns[0].enabled='0'
-    uci -q commit smartdns
-    /etc/init.d/smartdns disable 2>/dev/null
-    /etc/init.d/smartdns stop 2>/dev/null
-fi
+# SmartDNS: 确保配置节存在，然后强制禁用
+[ -f /etc/config/smartdns ] || touch /etc/config/smartdns
+uci -q get smartdns.@smartdns[0] >/dev/null 2>&1 || uci add smartdns smartdns >/dev/null 2>&1
+uci -q set smartdns.@smartdns[0].enabled='0'
+uci -q commit smartdns
+/etc/init.d/smartdns disable 2>/dev/null
 
+# CUPS
 if uci -q get cupsd.config >/dev/null 2>&1; then
     uci -q set cupsd.config.enabled='0'
     uci -q commit cupsd
     /etc/init.d/cupsd disable 2>/dev/null
-    /etc/init.d/cupsd stop 2>/dev/null
 fi
 
-if uci -q get dockerd.globals >/dev/null 2>&1; then
-    uci -q set dockerd.globals.auto_start='0'
-    uci -q commit dockerd
-    /etc/init.d/dockerd disable 2>/dev/null
-    /etc/init.d/dockerd stop 2>/dev/null
-    /etc/init.d/dockerman disable 2>/dev/null
-    /etc/init.d/dockerman stop 2>/dev/null
-fi
+# Docker: 保持默认启用，用于部署项目
 
 exit 0
 EOF
 
     chmod +x "$script_path"
+}
+
+# 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
+fix_smartdns_default_state() {
+    local config_paths=(
+        "$BUILD_DIR/feeds/small8/smartdns/files/etc/config/smartdns"
+        "$BUILD_DIR/feeds/packages/net/smartdns/files/etc/config/smartdns"
+        "$BUILD_DIR/package/feeds/small8/smartdns/files/etc/config/smartdns"
+        "$BUILD_DIR/package/feeds/packages/smartdns/files/etc/config/smartdns"
+    )
+
+    for cfg in "${config_paths[@]}"; do
+        [ -f "$cfg" ] || continue
+        if grep -q "option enabled '1'" "$cfg"; then
+            sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
+            echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+        fi
+    done
+
+    # 修补 init 脚本 START 优先级，确保在 uci-defaults (S10boot) 之后运行
+    local init_paths=(
+        "$BUILD_DIR/feeds/small8/smartdns/files/etc/init.d/smartdns"
+        "$BUILD_DIR/feeds/packages/net/smartdns/files/etc/init.d/smartdns"
+        "$BUILD_DIR/package/feeds/small8/smartdns/files/etc/init.d/smartdns"
+        "$BUILD_DIR/package/feeds/packages/smartdns/files/etc/init.d/smartdns"
+    )
+
+    for init in "${init_paths[@]}"; do
+        [ -f "$init" ] || continue
+        if grep -q '^START=19$' "$init"; then
+            sed -i 's/^START=19$/START=94/' "$init"
+            echo "已修补 SmartDNS init START=19 -> 94: $init"
+        fi
+    done
+
+    # 从 Makefile 的 postinst 中移除 enable 调用，防止安装时创建 rc.d 符号链接
+    local makefile_paths=(
+        "$BUILD_DIR/feeds/small8/smartdns/Makefile"
+        "$BUILD_DIR/feeds/packages/net/smartdns/Makefile"
+    )
+
+    for mk in "${makefile_paths[@]}"; do
+        [ -f "$mk" ] || continue
+        if grep -q '/etc/init.d/smartdns enable' "$mk"; then
+            sed -i '/\/etc\/init.d\/smartdns enable/d' "$mk"
+            echo "已从 Makefile 移除 smartdns enable: $mk"
+        fi
+    done
+}
+
+# 限制 QuickFile 和 Docker 的内存/CPU 占用
+fix_service_resource_limits() {
+    # --- QuickFile: Go 二进制，优化 GC 策略和资源限制 ---
+    # 注意: Go 程序的 VSZ (虚拟内存) 通常超过 1GB，这是 Go 运行时预留地址空间的正常行为，
+    # 实际物理内存占用 (RSS) 远小于 VSZ。以下优化可进一步控制 GC 行为。
+    local qf_init_paths=(
+        "$BUILD_DIR/package/emortal/quickfile/quickfile/files/quickfile.init"
+    )
+
+    for init in "${qf_init_paths[@]}"; do
+        [ -f "$init" ] || continue
+        if grep -q 'GOMEMLIMIT' "$init"; then
+            continue
+        fi
+        # GOMEMLIMIT=256MiB: Go GC 软上限，堆超过 256MB 后 GC 激进回收
+        sed -i '/procd_set_param respawn/a\    procd_set_param env GOMEMLIMIT=256MiB' "$init"
+        # 移除不必要的 core=unlimited
+        sed -i '/procd_set_param limits core="unlimited"/d' "$init"
+        # 将 nofile 降到合理值
+        sed -i 's/procd_set_param limits nofile="200000 200000"/procd_set_param limits nofile="8192 8192"/' "$init"
+        echo "已为 QuickFile 优化 Go GC 策略 (GOMEMLIMIT=256MiB)"
+    done
+
+    # --- Docker: 限制 dockerd OOM 优先级，保护路由核心服务 ---
+    local dockerd_init_paths=(
+        "$BUILD_DIR/feeds/packages/utils/dockerd/files/dockerd.init"
+        "$BUILD_DIR/package/feeds/packages/dockerd/files/dockerd.init"
+    )
+
+    for init in "${dockerd_init_paths[@]}"; do
+        [ -f "$init" ] || continue
+        if grep -q 'oom_score_adj' "$init"; then
+            continue
+        fi
+        # OOM 得分 500: 内存不足时优先杀 docker，保护路由核心
+        sed -i '/procd_close_instance/i\        procd_set_param oom_score_adj 500' "$init"
+        sed -i '/procd_close_instance/i\        procd_set_param limits nofile="8192 8192"' "$init"
+        echo "已为 dockerd 添加 OOM 保护 (oom_score_adj=500)"
+    done
 }
 
 patch_dockerman_ui() {

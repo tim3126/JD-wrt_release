@@ -75,6 +75,8 @@ main() {
     fix_oaf_kernel_compat
     fix_oaf_init
     add_service_default_policies
+    fix_smartdns_default_state
+    fix_service_resource_limits
     add_timecontrol
     add_ddnsgo_uci_defaults
     add_nikki_proxy_defaults

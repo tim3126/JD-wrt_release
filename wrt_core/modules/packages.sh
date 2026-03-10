@@ -226,6 +226,16 @@ add_timecontrol() {
         echo "错误：从 $repo_url 克隆 luci-app-timecontrol 仓库失败" >&2
         exit 1
     fi
+
+    # 修复菜单路径 (admin/control -> admin/services)
+    # 必须在 clone 之后立即执行，否则文件不存在
+    local menu_json="$timecontrol_dir/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
+    if [ -f "$menu_json" ]; then
+        sed -i 's/admin\/control/admin\/services/g' "$menu_json"
+        echo "timecontrol 菜单路径已修复"
+    else
+        echo "Warning: timecontrol menu.d JSON 未找到，菜单路径未修复" >&2
+    fi
 }
 
 update_adguardhome() {
