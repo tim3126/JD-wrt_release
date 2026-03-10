@@ -580,6 +580,55 @@ if uci -q get dockerd.globals >/dev/null 2>&1; then
     /etc/init.d/dockerman stop 2>/dev/null
 fi
 
+# TimeControl: 修复 rpcd ACL 缺少 /bin/ps 命令白名单导致 LuCI 状态显示未运行
+TC_ACL="/usr/share/rpcd/acl.d/luci-app-timecontrol.json"
+if [ -f "$TC_ACL" ] && ! grep -q '"/bin/ps"' "$TC_ACL"; then
+    cat > "$TC_ACL" << 'TCEOF'
+{
+   "luci-app-timecontrol": {
+        "description": "Grant UCI Internet time control for luci-app-timecontrol",
+        "read": {
+            "file": {
+                "/bin/ps": ["exec"],
+                "/bin/ps w": ["exec"]
+            },
+            "ubus": {
+                "file": ["exec", "list", "stat", "read"],
+                "uci": [ "*" ],
+                "timecontrol": ["*"]
+            }
+        },
+        "write": {
+            "ubus": {
+                "timecontrol": ["*"],
+                "file": ["write"],
+                "uci": ["*"]
+            }
+        }
+    }
+}
+TCEOF
+fi
+
+# Docker Events: 修复 uwsgi worker 耗尽导致 LuCI 卡死
+# 根因: Docker events 是流式 API, 每次调用会长时间占用一个 uwsgi worker
+#       events.js 页面加载时 load()+renderEventsTable() 同时发起调用,
+#       占满全部 2 个 uwsgi worker → nginx upstream timeout → 整个 LuCI UI 冻结
+# 修复: 页面加载时不发起任何 Docker events 调用, 用户通过过滤器手动触发
+EVENTS_JS="/www/luci-static/resources/view/dockerman/events.js"
+if [ -f "$EVENTS_JS" ]; then
+    # 1) load(): 移除 dm2.docker_events() 阻塞调用, 返回空结果
+    sed -i 's|dm2\.docker_events([^)]*)|Promise.resolve({code:200,body:[]})|' "$EVENTS_JS"
+    # 2) render(): 移除自动调用 renderEventsTable, 避免页面加载时发起流式请求
+    sed -i 's|this\.renderEventsTable(event_list)|void 0|' "$EVENTS_JS"
+    # 3) From 日期选择器默认值: 1970-01-01 → 1小时前
+    sed -i "s|'value':[ ]*'1970-01-01T00:00'|'value':new Date(Date.now()-3600000).toISOString().slice(0,16)|" "$EVENTS_JS"
+    # 4) renderEventsTable() 中 since 默认回退: '0' → 1小时前 (用户触发时生效)
+    sed -i "s|let since[ ]*=[ ]*'0'|let since=Math.floor((Date.now()-3600000)/1000).toString()|" "$EVENTS_JS"
+    # 5) 手动过滤触发: 短路 executeDockerAction(dm2.docker_events), 渲染空表
+    sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$EVENTS_JS"
+fi
+
 exit 0
 EOF
 

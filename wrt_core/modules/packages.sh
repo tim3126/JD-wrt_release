@@ -238,6 +238,40 @@ add_timecontrol() {
     else
         echo "Warning: timecontrol menu.d JSON 未找到，菜单路径未修复" >&2
     fi
+
+    # 修复 rpcd ACL: 添加 /bin/ps 命令路径白名单
+    # 根因: rpcd file.exec 需要同时满足 ubus 方法权限 + 命令路径白名单
+    #       上游 ACL 只有 ubus.file.exec, 缺少 file."/bin/ps".exec
+    #       导致 LuCI 前端 fs.exec('/bin/ps') 被拒绝 → 状态永远显示未运行
+    local acl_json="$timecontrol_dir/luci-app-timecontrol/root/usr/share/rpcd/acl.d/luci-app-timecontrol.json"
+    if [ -f "$acl_json" ]; then
+        cat > "$acl_json" << 'ACLEOF'
+{
+   "luci-app-timecontrol": {
+        "description": "Grant UCI Internet time control for luci-app-timecontrol",
+        "read": {
+            "file": {
+                "/bin/ps": ["exec"],
+                "/bin/ps w": ["exec"]
+            },
+            "ubus": {
+                "file": ["exec", "list", "stat", "read"],
+                "uci": [ "*" ],
+                "timecontrol": ["*"]
+            }
+        },
+        "write": {
+            "ubus": {
+                "timecontrol": ["*"],
+                "file": ["write"],
+                "uci": ["*"]
+            }
+        }
+    }
+}
+ACLEOF
+        echo "timecontrol rpcd ACL 已修复 (添加 /bin/ps exec 白名单)"
+    fi
 }
 
 update_adguardhome() {
