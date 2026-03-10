@@ -677,6 +677,13 @@ patch_dockerman_ui() {
         "$source_root/luasrc/model/cbi/dockerman/configuration.lua"
     install -Dm644 "$BASE_PATH/patches/dockerman/overview.lua" \
         "$source_root/luasrc/model/cbi/dockerman/overview.lua"
+
+    # 修复事件页 XHR 超时：since='0' (从1970年查所有事件) 改为最近1小时
+    local events_js="$source_root/htdocs/luci-static/resources/view/dockerman/events.js"
+    if [ -f "$events_js" ]; then
+        sed -i "s/since: \`0\`/since: \`\${now - 3600}\`/" "$events_js"
+        echo "已修复 dockerman events.js 默认查询范围 (0 -> now-3600)"
+    fi
 }
 
 update_geoip() {

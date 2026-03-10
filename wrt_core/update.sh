@@ -75,8 +75,6 @@ main() {
     fix_oaf_kernel_compat
     fix_oaf_init
     add_service_default_policies
-    fix_smartdns_default_state
-    fix_service_resource_limits
     add_timecontrol
     add_ddnsgo_uci_defaults
     add_nikki_proxy_defaults
@@ -94,6 +92,8 @@ main() {
     remove_attendedsysupgrade
     fix_kconfig_recursive_dependency
     install_feeds
+    fix_smartdns_default_state
+    fix_service_resource_limits
     fix_cups_libcups_avahi_depends
     fix_easytier_lua
     update_adguardhome
