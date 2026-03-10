@@ -572,6 +572,36 @@ fi
 
 # Docker: 保持默认启用，用于部署项目
 
+# TimeControl: 修复 rpcd ACL 缺少 /bin/ps 命令白名单导致 LuCI 状态显示未运行
+TC_ACL="/usr/share/rpcd/acl.d/luci-app-timecontrol.json"
+if [ -f "$TC_ACL" ] && ! grep -q '"/bin/ps"' "$TC_ACL"; then
+    cat > "$TC_ACL" << 'TCEOF'
+{
+   "luci-app-timecontrol": {
+        "description": "Grant UCI Internet time control for luci-app-timecontrol",
+        "read": {
+            "file": {
+                "/bin/ps": ["exec"],
+                "/bin/ps w": ["exec"]
+            },
+            "ubus": {
+                "file": ["exec", "list", "stat", "read"],
+                "uci": [ "*" ],
+                "timecontrol": ["*"]
+            }
+        },
+        "write": {
+            "ubus": {
+                "timecontrol": ["*"],
+                "file": ["write"],
+                "uci": ["*"]
+            }
+        }
+    }
+}
+TCEOF
+fi
+
 # Docker Events: 修复 uwsgi worker 耗尽导致 LuCI 卡死
 # 根因: Docker events 是流式 API, 每次调用会长时间占用一个 uwsgi worker
 #       events.js 页面加载时 load()+renderEventsTable() 同时发起调用,
