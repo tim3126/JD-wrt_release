@@ -23,17 +23,22 @@ apply_feed_locks() {
     while IFS='=' read -r name hash; do
         # 跳过注释和空行
         [[ "$name" =~ ^[[:space:]]*# ]] && continue
-        name=$(echo "$name" | xargs)
-        hash=$(echo "$hash" | xargs)
+        name=$(echo "$name" | tr -d '\r' | xargs)
+        hash=$(echo "$hash" | tr -d '\r' | xargs)
         [ -z "$name" ] || [ -z "$hash" ] && continue
 
         # small8 是 src-link，不在 feeds.conf 中锁定 (在 prepare_small8_feed 中处理)
         [ "$name" = "small8" ] && continue
 
         # 对 src-git/src-git-full 行追加 ^HASH
+        # 注意: OpenWrt feeds 格式为 url^hash，不能有 ;branch
+        # 如果 URL 含 ;branch，必须先去掉 ;branch 再追加 ^hash
         if grep -qE "^src-git(-full)?[[:space:]]+${name}[[:space:]]" "$feeds_path"; then
-            # 先移除已有的 ^hash，再追加新的
+            # 1) 移除已有的 ^hash
             sed -i "s|^\(src-git\(-full\)\?[[:space:]]\+${name}[[:space:]]\+[^[:space:]]*\)\^[0-9a-f]*|\1|" "$feeds_path"
+            # 2) 移除 ;branch 后缀（如 ;main, ;master 等）
+            sed -i "s|^\(src-git\(-full\)\?[[:space:]]\+${name}[[:space:]]\+[^;[:space:]]*\);[^[:space:]]*|\1|" "$feeds_path"
+            # 3) 追加 ^hash
             sed -i "s|^\(src-git\(-full\)\?[[:space:]]\+${name}[[:space:]]\+[^[:space:]]*\)|\1^${hash}|" "$feeds_path"
             echo "  锁定: ${name} -> ${hash:0:12}"
         fi

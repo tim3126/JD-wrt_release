@@ -558,9 +558,9 @@ uci -q set smartdns.@smartdns[0].enabled='0'
 uci -q commit smartdns
 /etc/init.d/smartdns disable 2>/dev/null
 
-# SmartDNS: 修补 init START 优先级 (19→94)
+# SmartDNS: 修补 init START 优先级，避免在 uci-defaults 之前运行
 if [ -f /etc/init.d/smartdns ]; then
-    sed -i 's/^START=19$/START=94/' /etc/init.d/smartdns
+    sed -i 's/^START=[0-9]*/START=94/' /etc/init.d/smartdns
 fi
 
 # CUPS
@@ -686,9 +686,11 @@ fix_smartdns_default_state() {
     # 动态查找 SmartDNS init 脚本，修补 START 优先级（兼容 smartdns.init / init.d/smartdns）
     while IFS= read -r init; do
         [ -f "$init" ] || continue
-        if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+        if grep -qE '^START[[:space:]]*=' "$init"; then
+            local old_start
+            old_start=$(grep -oE '^START[[:space:]]*=[[:space:]]*[0-9]+' "$init" | head -1)
             sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-            echo "已修补 SmartDNS init START=19 -> 94: $init"
+            echo "已修补 SmartDNS init ${old_start} -> START=94: $init"
             found=$((found + 1))
         fi
     done < <(
@@ -714,9 +716,9 @@ fix_smartdns_default_state() {
         # 宽搜索: 查找任何 SmartDNS init 脚本
         while IFS= read -r init; do
             [ -f "$init" ] || continue
-            if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+            if grep -qE '^START[[:space:]]*=' "$init"; then
                 sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-                echo "已修补 SmartDNS init (宽搜索) START=19 -> 94: $init"
+                echo "已修补 SmartDNS init (宽搜索) -> START=94: $init"
                 found=$((found + 1))
             fi
         done < <(

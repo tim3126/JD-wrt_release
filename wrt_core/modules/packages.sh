@@ -141,7 +141,7 @@ install_small8() {
         netdata luci-app-netdata luci-app-openclash luci-app-amlogic tailscale luci-app-tailscale
         oaf open-app-filter luci-app-oaf easytier luci-app-easytier msd_lite luci-app-msd_lite
         cups luci-app-cupsd smartdns luci-app-smartdns
-        luci-app-homeproxy
+        luci-app-homeproxy luci-app-lucky lucky
         ddns-go luci-app-ddns-go
     )
 
