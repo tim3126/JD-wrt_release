@@ -649,22 +649,45 @@ EOF
     chmod +x "$script_path"
 }
 
-# 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
+# 构建时修补 SmartDNS: 通过 quilt patch 修改 init START 优先级和默认配置
+# 注意: SmartDNS 源码在 make download 时才下载，此函数运行时 init 脚本尚不存在
+# 因此不能直接 sed 修改，而要将 patch 安装到 feed 的 patches/ 目录，
+# 让 OpenWrt 构建系统在编译 smartdns 包时自动应用
 fix_smartdns_default_state() {
+    local patch_src="$BASE_PATH/patches/100-smartdns-optimize.patch"
     local found=0
 
-    # Debug: 列出所有 smartdns 相关目录
-    echo "[SmartDNS] 搜索目录: $BUILD_DIR"
-    while IFS= read -r d; do
-        echo "[SmartDNS] 发现目录: $d"
-    done < <(find -L "$BUILD_DIR" -maxdepth 6 -type d -name "smartdns" 2>/dev/null || true)
+    if [ ! -f "$patch_src" ]; then
+        echo "Warning: SmartDNS patch 不存在: $patch_src" >&2
+        return
+    fi
 
-    # 动态查找 SmartDNS 默认配置文件（兼容不同 feed 目录结构）
+    # 查找 SmartDNS feed 包目录（支持 packages feed 和 small8 feed）
+    local smartdns_dirs=(
+        "$BUILD_DIR/feeds/packages/net/smartdns"
+        "$BUILD_DIR/package/feeds/packages/smartdns"
+        "$BUILD_DIR/feeds/small8/smartdns"
+        "$BUILD_DIR/package/feeds/small8/smartdns"
+    )
+
+    for pkg_dir in "${smartdns_dirs[@]}"; do
+        [ -d "$pkg_dir" ] || continue
+        # 只对有 Makefile 的真实包目录操作
+        [ -f "$pkg_dir/Makefile" ] || continue
+
+        local patches_dir="$pkg_dir/patches"
+        mkdir -p "$patches_dir"
+        cp -f "$patch_src" "$patches_dir/"
+        echo "[SmartDNS] 已安装 quilt patch 到: $patches_dir/"
+        found=$((found + 1))
+    done
+
+    # 动态查找 SmartDNS 默认配置文件，禁用自启
     while IFS= read -r cfg; do
         [ -f "$cfg" ] || continue
         if grep -q "option enabled '1'" "$cfg"; then
             sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
-            echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+            echo "[SmartDNS] 已修补默认配置 enabled='0': $cfg"
             found=$((found + 1))
         fi
     done < <(
@@ -675,54 +698,18 @@ fix_smartdns_default_state() {
             -type f 2>/dev/null || true
     )
 
-    # 动态查找 SmartDNS init 脚本，修补 START 优先级
-    # 宽泛搜索: 任何名为 smartdns.init 或 init.d/smartdns 的文件
-    while IFS= read -r init; do
-        [ -f "$init" ] || continue
-        # 跳过 staging_dir 缓存副本（编译时会被覆盖）
-        [[ "$init" == *staging_dir* ]] && continue
-        if grep -qE '^START[[:space:]]*=' "$init"; then
-            local old_start
-            old_start=$(grep -oE '^START[[:space:]]*=[[:space:]]*[0-9]+' "$init" | head -1)
-            sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-            echo "已修补 SmartDNS init ${old_start} -> START=94: $init"
-            found=$((found + 1))
-        fi
-    done < <(
-        find -L "$BUILD_DIR" \
-            \( -name "smartdns.init" -o -path "*/init.d/smartdns" \) \
-            -type f 2>/dev/null || true
-    )
-
     # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
     while IFS= read -r mk; do
         [ -f "$mk" ] || continue
         if grep -qE '/etc/init\.d/smartdns[[:space:]]+enable' "$mk"; then
             sed -i '/\/etc\/init\.d\/smartdns[[:space:]][[:space:]]*enable/d' "$mk"
-            echo "已从 Makefile 移除 smartdns enable: $mk"
+            echo "[SmartDNS] 已从 Makefile 移除 smartdns enable: $mk"
             found=$((found + 1))
         fi
     done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null || true)
 
-    # 如果 feed 源码中没找到，回退到 staging_dir 缓存副本
     if [ "$found" -eq 0 ]; then
-        echo "[SmartDNS] feed 源码中未找到 init 脚本，尝试 staging_dir..." >&2
-        while IFS= read -r init; do
-            [ -f "$init" ] || continue
-            if grep -qE '^START[[:space:]]*=' "$init"; then
-                sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-                echo "已修补 SmartDNS init (staging): $init"
-                found=$((found + 1))
-            fi
-        done < <(
-            find -L "$BUILD_DIR/staging_dir" \
-                -path "*/init.d/smartdns" \
-                -type f 2>/dev/null || true
-        )
-    fi
-
-    if [ "$found" -eq 0 ]; then
-        echo "Warning: 未找到任何 SmartDNS init 可修补" >&2
+        echo "Warning: 未找到 SmartDNS feed 包目录，patch 未安装" >&2
     fi
 }
 
