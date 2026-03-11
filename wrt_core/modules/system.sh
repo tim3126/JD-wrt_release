@@ -558,9 +558,9 @@ uci -q set smartdns.@smartdns[0].enabled='0'
 uci -q commit smartdns
 /etc/init.d/smartdns disable 2>/dev/null
 
-# SmartDNS: 修补 init START 优先级 (19→94)，避免在 uci-defaults 之前运行
+# SmartDNS: 修补 init START 优先级，避免在 uci-defaults 之前运行
 if [ -f /etc/init.d/smartdns ]; then
-    sed -i 's/^START=19$/START=94/' /etc/init.d/smartdns
+    sed -i 's/^START=[0-9]*/START=94/' /etc/init.d/smartdns
 fi
 
 # CUPS
@@ -675,19 +675,22 @@ fix_smartdns_default_state() {
             -type f 2>/dev/null || true
     )
 
-    # 动态查找 SmartDNS init 脚本，修补 START 优先级（兼容 smartdns.init / init.d/smartdns）
+    # 动态查找 SmartDNS init 脚本，修补 START 优先级
+    # 宽泛搜索: 任何名为 smartdns.init 或 init.d/smartdns 的文件
     while IFS= read -r init; do
         [ -f "$init" ] || continue
-        if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+        # 跳过 staging_dir 缓存副本（编译时会被覆盖）
+        [[ "$init" == *staging_dir* ]] && continue
+        if grep -qE '^START[[:space:]]*=' "$init"; then
+            local old_start
+            old_start=$(grep -oE '^START[[:space:]]*=[[:space:]]*[0-9]+' "$init" | head -1)
             sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-            echo "已修补 SmartDNS init START=19 -> 94: $init"
+            echo "已修补 SmartDNS init ${old_start} -> START=94: $init"
             found=$((found + 1))
         fi
     done < <(
         find -L "$BUILD_DIR" \
-            \( -path "*/smartdns/files/etc/init.d/smartdns" \
-            -o -path "*/smartdns/files/smartdns.init" \
-            -o -path "*/etc/init.d/smartdns" \) \
+            \( -name "smartdns.init" -o -path "*/init.d/smartdns" \) \
             -type f 2>/dev/null || true
     )
 
@@ -701,25 +704,25 @@ fix_smartdns_default_state() {
         fi
     done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null || true)
 
+    # 如果 feed 源码中没找到，回退到 staging_dir 缓存副本
     if [ "$found" -eq 0 ]; then
-        echo "Warning: 未找到任何 SmartDNS 文件可修补，尝试宽搜索..." >&2
-        # 宽搜索: 查找任何 SmartDNS init 脚本
+        echo "[SmartDNS] feed 源码中未找到 init 脚本，尝试 staging_dir..." >&2
         while IFS= read -r init; do
             [ -f "$init" ] || continue
-            if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+            if grep -qE '^START[[:space:]]*=' "$init"; then
                 sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-                echo "已修补 SmartDNS init (宽搜索) START=19 -> 94: $init"
+                echo "已修补 SmartDNS init (staging): $init"
                 found=$((found + 1))
             fi
         done < <(
-            find -L "$BUILD_DIR" \
-                \( -name "smartdns.init" -o -path "*/init.d/smartdns" \) \
+            find -L "$BUILD_DIR/staging_dir" \
+                -path "*/init.d/smartdns" \
                 -type f 2>/dev/null || true
         )
     fi
 
     if [ "$found" -eq 0 ]; then
-        echo "Warning: 宽搜索仍未找到 SmartDNS 文件" >&2
+        echo "Warning: 未找到任何 SmartDNS init 可修补" >&2
     fi
 }
 
