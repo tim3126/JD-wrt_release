@@ -177,7 +177,62 @@ update_feeds() {
     cat "$FEEDS_PATH"
     echo "---"
 
-    ./scripts/feeds update -a
+    # ── 逐个更新 feed，可选 feed 失败时自动跳过 ──
+    local OPTIONAL_FEEDS=("passwall" "nikki" "openwrt_bandix" "luci_app_bandix")
+    local MAX_RETRIES=3
+    local RETRY_DELAY=5
+    local feed_names=()
+    local failed_feeds=()
+
+    # 从 feeds.conf 提取所有 feed 名称
+    while IFS= read -r line; do
+        local fname
+        fname=$(echo "$line" | awk '{print $2}')
+        [ -n "$fname" ] && feed_names+=("$fname")
+    done < <(grep -E '^src-(git|git-full|link)' "$FEEDS_PATH")
+
+    for fname in "${feed_names[@]}"; do
+        echo "[Feeds] 更新 feed: $fname"
+        local success=false
+        for attempt in $(seq 1 $MAX_RETRIES); do
+            if ./scripts/feeds update "$fname"; then
+                echo "[Feeds] $fname 更新成功"
+                success=true
+                break
+            fi
+            if [ $attempt -lt $MAX_RETRIES ]; then
+                echo "[Feeds] $fname 第 $attempt 次尝试失败，${RETRY_DELAY}s 后重试..." >&2
+                # 清理可能残留的不完整目录
+                rm -rf "$BUILD_DIR/feeds/$fname"
+                sleep $RETRY_DELAY
+            fi
+        done
+
+        if ! $success; then
+            # 判断是否为可选 feed
+            local is_optional=false
+            for opt in "${OPTIONAL_FEEDS[@]}"; do
+                [ "$fname" = "$opt" ] && is_optional=true && break
+            done
+
+            if $is_optional; then
+                echo "[Feeds] WARNING: 可选 feed '$fname' 经 $MAX_RETRIES 次重试仍失败，从配置中移除并继续" >&2
+                failed_feeds+=("$fname")
+                rm -rf "$BUILD_DIR/feeds/$fname"
+                sed -i "/^src-git\(-full\)\?[[:space:]]\+${fname}[[:space:]]/d" "$FEEDS_PATH"
+            else
+                echo "[Feeds] ERROR: 必需 feed '$fname' 更新失败" >&2
+                exit 1
+            fi
+        fi
+    done
+
+    # 有 feed 被移除时重建索引
+    if [ ${#failed_feeds[@]} -gt 0 ]; then
+        echo "[Feeds] 以下可选 feed 未能获取: ${failed_feeds[*]}"
+        echo "[Feeds] 重建索引..."
+        ./scripts/feeds update -i
+    fi
 
     if [ ! -d "$BUILD_DIR/feeds/small8" ]; then
         echo "Error: feeds/small8 was not created after feeds update" >&2
