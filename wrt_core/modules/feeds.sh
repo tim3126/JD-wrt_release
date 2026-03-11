@@ -156,15 +156,6 @@ update_feeds() {
         echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >>"$FEEDS_PATH"
     fi
 
-    if ! grep -q "openwrt_bandix" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo 'src-git openwrt_bandix https://github.com/timsaya/openwrt-bandix.git;main' >>"$FEEDS_PATH"
-    fi
-
-    if ! grep -q "luci_app_bandix" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo 'src-git luci_app_bandix https://github.com/timsaya/luci-app-bandix.git;main' >>"$FEEDS_PATH"
-    fi
 
     if [ ! -f "$BUILD_DIR/include/bpf.mk" ]; then
         touch "$BUILD_DIR/include/bpf.mk"
@@ -178,7 +169,7 @@ update_feeds() {
     echo "---"
 
     # ── 逐个更新 feed，可选 feed 失败时自动跳过 ──
-    local OPTIONAL_FEEDS=("passwall" "nikki" "openwrt_bandix" "luci_app_bandix")
+    local OPTIONAL_FEEDS=("passwall" "nikki")
     local MAX_RETRIES=3
     local RETRY_DELAY=5
     local feed_names=()
