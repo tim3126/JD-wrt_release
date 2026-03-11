@@ -283,7 +283,7 @@ import re
 import sys
 
 path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
+text = path.read_text(encoding="latin-1")
 lines = text.splitlines()
 
 out = []
@@ -307,7 +307,7 @@ while i < len(lines):
     i += 1
 
 if replaced:
-    path.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
+    path.write_text("\n".join(out) + "\n", encoding="latin-1", newline="\n")
 PY
         echo "timecontrol init 已修复 (无规则时仍保持服务运行)"
     fi
