@@ -270,6 +270,47 @@ add_timecontrol() {
 ACLEOF
         echo "timecontrol rpcd ACL 已修复 (添加 /bin/ps exec 白名单)"
     fi
+
+    # 修复 timecontrol “显示未运行”根因:
+    # 上游 init 仅在存在 option enable '1' 规则时才启动 timecontrolctrl 进程，
+    # LuCI 前端又通过 ps 检测该进程 => 默认状态下永远显示未运行。
+    # 这里改为始终启动控制进程，由规则决定是否实际执行封禁动作。
+    local init_script="$timecontrol_dir/luci-app-timecontrol/root/etc/init.d/timecontrol"
+    if [ -f "$init_script" ]; then
+        python - "$init_script" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+lines = text.splitlines()
+
+out = []
+i = 0
+replaced = False
+while i < len(lines):
+    if re.match(r'^\s*_timecontrol_start\(\)\s*\{', lines[i]):
+        out.append("_timecontrol_start() {")
+        out.append("\ttouch $LOCK")
+        out.append("\ttimecontrol start")
+        out.append("\tstart_instance")
+        out.append("}")
+        replaced = True
+        i += 1
+        while i < len(lines) and lines[i].strip() != "}":
+            i += 1
+        if i < len(lines):
+            i += 1
+        continue
+    out.append(lines[i])
+    i += 1
+
+if replaced:
+    path.write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
+PY
+        echo "timecontrol init 已修复 (无规则时仍保持服务运行)"
+    fi
 }
 
 update_adguardhome() {

@@ -5,7 +5,7 @@ set -o errexit
 set -o errtrace
 
 error_handler() {
-    echo "Error occurred in script at line: ${BASH_LINENO[0]}, command: '${BASH_COMMAND}'"
+    echo "Error occurred in script at line: ${BASH_LINENO[0]}, command: '${BASH_COMMAND}'" >&2
 }
 
 trap 'error_handler' ERR
