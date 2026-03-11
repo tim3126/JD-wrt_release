@@ -610,6 +610,28 @@ if [ -f "$TC_ACL" ] && ! grep -q '"/bin/ps"' "$TC_ACL"; then
 TCEOF
 fi
 
+# PBR: 首次启动兜底同步 compat，避免 LuCI 提示版本不匹配
+PBR_INIT="/etc/init.d/pbr"
+PBR_RPCD="/usr/libexec/rpcd/luci.pbr"
+PBR_STATUS_JS="/www/luci-static/resources/pbr/status.js"
+if [ -f "$PBR_INIT" ]; then
+    pbr_pkg_compat="$(grep -o "packageCompat='[0-9][0-9]*'" "$PBR_INIT" 2>/dev/null | head -n1 | grep -o "[0-9][0-9]*")"
+    if [ -n "$pbr_pkg_compat" ]; then
+        if [ -f "$PBR_RPCD" ]; then
+            pbr_rpcd_compat="$(grep -o "rpcdCompat='[0-9][0-9]*'" "$PBR_RPCD" 2>/dev/null | head -n1 | grep -o "[0-9][0-9]*")"
+            if [ -n "$pbr_rpcd_compat" ] && [ "$pbr_rpcd_compat" != "$pbr_pkg_compat" ]; then
+                sed -i "s/rpcdCompat='${pbr_rpcd_compat}'/rpcdCompat='${pbr_pkg_compat}'/" "$PBR_RPCD"
+            fi
+        fi
+        if [ -f "$PBR_STATUS_JS" ]; then
+            pbr_luci_compat="$(sed -n '/LuciCompat/,/return/{s/.*return \+\([0-9]\+\).*/\1/p}' "$PBR_STATUS_JS" 2>/dev/null | head -n1)"
+            if [ -n "$pbr_luci_compat" ] && [ "$pbr_luci_compat" != "$pbr_pkg_compat" ]; then
+                sed -i "/LuciCompat/,/return/{s/return ${pbr_luci_compat}/return ${pbr_pkg_compat}/}" "$PBR_STATUS_JS"
+            fi
+        fi
+    fi
+fi
+
 # Docker Events: 修复 uwsgi worker 耗尽导致 LuCI 卡死
 # 根因: Docker events 是流式 API, 每次调用会长时间占用一个 uwsgi worker
 #       events.js 页面加载时 load()+renderEventsTable() 同时发起调用,
@@ -641,47 +663,67 @@ fix_smartdns_default_state() {
 
     # Debug: 列出所有 smartdns 相关目录
     echo "[SmartDNS] 搜索目录: $BUILD_DIR"
-    find -L "$BUILD_DIR" -maxdepth 6 -type d -name "smartdns" 2>/dev/null | while read -r d; do
+    while IFS= read -r d; do
         echo "[SmartDNS] 发现目录: $d"
-    done
+    done < <(find -L "$BUILD_DIR" -maxdepth 6 -type d -name "smartdns" 2>/dev/null || true)
 
-    # 动态查找 SmartDNS 默认配置文件 (-L 穿透符号链接)
+    # 动态查找 SmartDNS 默认配置文件（兼容不同 feed 目录结构）
     while IFS= read -r cfg; do
+        [ -f "$cfg" ] || continue
         if grep -q "option enabled '1'" "$cfg"; then
             sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
             echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
             found=$((found + 1))
         fi
-    done < <(find -L "$BUILD_DIR" -path "*/smartdns/files/etc/config/smartdns" -type f 2>/dev/null)
+    done < <(
+        find -L "$BUILD_DIR" \
+            \( -path "*/smartdns/files/etc/config/smartdns" \
+            -o -path "*/smartdns/files/smartdns.conf" \
+            -o -path "*/smartdns/files/smartdns.config" \) \
+            -type f 2>/dev/null || true
+    )
 
-    # 动态查找 SmartDNS init 脚本，修补 START 优先级
+    # 动态查找 SmartDNS init 脚本，修补 START 优先级（兼容 smartdns.init / init.d/smartdns）
     while IFS= read -r init; do
-        if grep -q '^START=19$' "$init"; then
-            sed -i 's/^START=19$/START=94/' "$init"
+        [ -f "$init" ] || continue
+        if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+            sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
             echo "已修补 SmartDNS init START=19 -> 94: $init"
             found=$((found + 1))
         fi
-    done < <(find -L "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null)
+    done < <(
+        find -L "$BUILD_DIR" \
+            \( -path "*/smartdns/files/etc/init.d/smartdns" \
+            -o -path "*/smartdns/files/smartdns.init" \
+            -o -path "*/etc/init.d/smartdns" \) \
+            -type f 2>/dev/null || true
+    )
 
     # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
     while IFS= read -r mk; do
-        if grep -q '/etc/init.d/smartdns enable' "$mk"; then
-            sed -i '/\/etc\/init.d\/smartdns enable/d' "$mk"
+        [ -f "$mk" ] || continue
+        if grep -qE '/etc/init\.d/smartdns[[:space:]]+enable' "$mk"; then
+            sed -i '/\/etc\/init\.d\/smartdns[[:space:]][[:space:]]*enable/d' "$mk"
             echo "已从 Makefile 移除 smartdns enable: $mk"
             found=$((found + 1))
         fi
-    done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null)
+    done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null || true)
 
     if [ "$found" -eq 0 ]; then
         echo "Warning: 未找到任何 SmartDNS 文件可修补，尝试宽搜索..." >&2
-        # 宽搜索: 查找任何名为 smartdns 的 init 脚本
+        # 宽搜索: 查找任何 SmartDNS init 脚本
         while IFS= read -r init; do
-            if grep -q '^START=19$' "$init"; then
-                sed -i 's/^START=19$/START=94/' "$init"
+            [ -f "$init" ] || continue
+            if grep -qE '^START[[:space:]]*=[[:space:]]*19$' "$init"; then
+                sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
                 echo "已修补 SmartDNS init (宽搜索) START=19 -> 94: $init"
                 found=$((found + 1))
             fi
-        done < <(find -L "$BUILD_DIR" -name "smartdns" -path "*/init.d/*" -type f 2>/dev/null)
+        done < <(
+            find -L "$BUILD_DIR" \
+                \( -name "smartdns.init" -o -path "*/init.d/smartdns" \) \
+                -type f 2>/dev/null || true
+        )
     fi
 
     if [ "$found" -eq 0 ]; then
