@@ -643,28 +643,79 @@ if [ -f "$EVENTS_JS" ]; then
     sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$EVENTS_JS"
 fi
 
+# SmartDNS LuCI: 修复状态显示永远显示 "RUNNING" 的 bug
+# 根因: smartdnsServiceStatus() 返回 Promise.all([getServiceStatus()]),
+#       结果是数组 [false]，而 JS 中 if([false]) 为 truthy → 永远显示 RUNNING
+# 修复: smartdnsRenderStatus(res) → smartdnsRenderStatus(res[0])，取出数组中的布尔值
+SMARTDNS_JS="/www/luci-static/resources/view/smartdns/smartdns.js"
+if [ -f "$SMARTDNS_JS" ]; then
+    sed -i 's/smartdnsRenderStatus(res)/smartdnsRenderStatus(res[0])/' "$SMARTDNS_JS"
+fi
+
 exit 0
 EOF
 
     chmod +x "$script_path"
 }
 
-# 构建时修补 SmartDNS 默认配置和 init 脚本，从根源禁用自启
+# 构建时修补 SmartDNS: 修改 init START 优先级、禁用自启、优化 DNS 配置
+# 核心策略: 直接 sed 修改 feed 目录中的 init 脚本和配置文件
+# (quilt patch 仅作为补充，覆盖从源码编译的情况)
 fix_smartdns_default_state() {
+    local patch_src="$BASE_PATH/patches/100-smartdns-optimize.patch"
     local found=0
 
-    # Debug: 列出所有 smartdns 相关目录
-    echo "[SmartDNS] 搜索目录: $BUILD_DIR"
-    while IFS= read -r d; do
-        echo "[SmartDNS] 发现目录: $d"
-    done < <(find -L "$BUILD_DIR" -maxdepth 6 -type d -name "smartdns" 2>/dev/null || true)
+    # 查找 SmartDNS feed 包目录（支持 packages feed 和 small8 feed）
+    local smartdns_dirs=(
+        "$BUILD_DIR/feeds/packages/net/smartdns"
+        "$BUILD_DIR/feeds/small8/smartdns"
+    )
 
-    # 动态查找 SmartDNS 默认配置文件（兼容不同 feed 目录结构）
+    # === 1. 直接 sed 修改 feed 目录中的 init 脚本 (最关键的修复) ===
+    # feed 目录中的 files/etc/init.d/smartdns 会被直接安装到固件中，
+    # 优先级高于 quilt patch 修改的源码中的 init 脚本
+    for pkg_dir in "${smartdns_dirs[@]}"; do
+        local init_script="$pkg_dir/files/etc/init.d/smartdns"
+        [ -f "$init_script" ] || continue
+        if grep -q '^START=19' "$init_script"; then
+            sed -i 's/^START=19/START=94/' "$init_script"
+            echo "[SmartDNS] 已直接修改 feed init 脚本 START=19 -> 94: $init_script"
+            found=$((found + 1))
+        elif grep -q '^START=' "$init_script"; then
+            echo "[SmartDNS] feed init 脚本 START 值已非 19，跳过: $init_script (当前值: $(grep '^START=' "$init_script"))"
+        fi
+    done
+    # 也搜索通用 init 脚本路径 (以防目录结构不同)
+    while IFS= read -r init_script; do
+        [ -f "$init_script" ] || continue
+        if grep -q '^START=19' "$init_script"; then
+            sed -i 's/^START=19/START=94/' "$init_script"
+            echo "[SmartDNS] 已直接修改 init 脚本 START=19 -> 94: $init_script"
+            found=$((found + 1))
+        fi
+    done < <(
+        find -L "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null || true
+    )
+
+    # === 2. 安装 quilt patch (补充: 覆盖从源码编译 init 脚本的情况) ===
+    if [ -f "$patch_src" ]; then
+        for pkg_dir in "${smartdns_dirs[@]}"; do
+            [ -d "$pkg_dir" ] || continue
+            [ -f "$pkg_dir/Makefile" ] || continue
+            local patches_dir="$pkg_dir/patches"
+            mkdir -p "$patches_dir"
+            cp -f "$patch_src" "$patches_dir/"
+            echo "[SmartDNS] 已安装 quilt patch 到: $patches_dir/"
+            found=$((found + 1))
+        done
+    fi
+
+    # === 3. 禁用 SmartDNS 默认自启配置 ===
     while IFS= read -r cfg; do
         [ -f "$cfg" ] || continue
         if grep -q "option enabled '1'" "$cfg"; then
             sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
-            echo "已修补 SmartDNS 默认配置 enabled='0': $cfg"
+            echo "[SmartDNS] 已修补默认配置 enabled='0': $cfg"
             found=$((found + 1))
         fi
     done < <(
@@ -675,54 +726,30 @@ fix_smartdns_default_state() {
             -type f 2>/dev/null || true
     )
 
-    # 动态查找 SmartDNS init 脚本，修补 START 优先级
-    # 宽泛搜索: 任何名为 smartdns.init 或 init.d/smartdns 的文件
-    while IFS= read -r init; do
-        [ -f "$init" ] || continue
-        # 跳过 staging_dir 缓存副本（编译时会被覆盖）
-        [[ "$init" == *staging_dir* ]] && continue
-        if grep -qE '^START[[:space:]]*=' "$init"; then
-            local old_start
-            old_start=$(grep -oE '^START[[:space:]]*=[[:space:]]*[0-9]+' "$init" | head -1)
-            sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-            echo "已修补 SmartDNS init ${old_start} -> START=94: $init"
-            found=$((found + 1))
-        fi
-    done < <(
-        find -L "$BUILD_DIR" \
-            \( -name "smartdns.init" -o -path "*/init.d/smartdns" \) \
-            -type f 2>/dev/null || true
-    )
-
-    # 动态查找 SmartDNS Makefile，移除 postinst 中的 enable 调用
+    # === 4. 移除 Makefile 中的 postinst enable 调用 ===
     while IFS= read -r mk; do
         [ -f "$mk" ] || continue
         if grep -qE '/etc/init\.d/smartdns[[:space:]]+enable' "$mk"; then
             sed -i '/\/etc\/init\.d\/smartdns[[:space:]][[:space:]]*enable/d' "$mk"
-            echo "已从 Makefile 移除 smartdns enable: $mk"
+            echo "[SmartDNS] 已从 Makefile 移除 smartdns enable: $mk"
             found=$((found + 1))
         fi
     done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null || true)
 
-    # 如果 feed 源码中没找到，回退到 staging_dir 缓存副本
-    if [ "$found" -eq 0 ]; then
-        echo "[SmartDNS] feed 源码中未找到 init 脚本，尝试 staging_dir..." >&2
-        while IFS= read -r init; do
-            [ -f "$init" ] || continue
-            if grep -qE '^START[[:space:]]*=' "$init"; then
-                sed -i 's/^START[[:space:]]*=.*/START=94/' "$init"
-                echo "已修补 SmartDNS init (staging): $init"
-                found=$((found + 1))
-            fi
-        done < <(
-            find -L "$BUILD_DIR/staging_dir" \
-                -path "*/init.d/smartdns" \
-                -type f 2>/dev/null || true
-        )
-    fi
+    # === 5. 修复 LuCI SmartDNS 状态显示 bug ===
+    # smartdnsServiceStatus() 返回 Promise.all([...]) 即数组，JS 中 if([false]) 为 truthy
+    # 修复: smartdnsRenderStatus(res) → smartdnsRenderStatus(res[0])
+    while IFS= read -r luci_js; do
+        [ -f "$luci_js" ] || continue
+        if grep -q 'smartdnsRenderStatus(res)' "$luci_js"; then
+            sed -i 's/smartdnsRenderStatus(res)/smartdnsRenderStatus(res[0])/' "$luci_js"
+            echo "[SmartDNS] 已修复 LuCI 状态显示 bug: $luci_js"
+            found=$((found + 1))
+        fi
+    done < <(find -L "$BUILD_DIR" -path "*/smartdns/htdocs/luci-static/resources/view/smartdns/smartdns.js" -type f 2>/dev/null || true)
 
     if [ "$found" -eq 0 ]; then
-        echo "Warning: 未找到任何 SmartDNS init 可修补" >&2
+        echo "Warning: 未找到任何 SmartDNS 文件可修改" >&2
     fi
 }
 
