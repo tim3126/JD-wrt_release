@@ -107,7 +107,7 @@ jobs:
           echo "内核：${{ env.KVER }}" >> release_body.txt
           echo "" >> release_body.txt
           echo "### 默认配置" >> release_body.txt
-          echo "- LAN地址: 192.168.10.1" >> release_body.txt
+          echo "- LAN地址: 192.168.1.1" >> release_body.txt
           echo "- 无WiFi（有线NSS加速）" >> release_body.txt
           echo "" >> release_body.txt
           echo "### 预装插件" >> release_body.txt
