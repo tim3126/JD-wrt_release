@@ -2,7 +2,15 @@
 
 set -e
 
-# Determine wrt_core path
+if [ "$(id -u)" = "0" ]; then
+    export FORCE_UNSAFE_CONFIGURE=1
+fi
+
+if printf '%s\n' "$PATH" | tr ':' '\n' | grep -qv '^/'; then
+    export PATH
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
+
 if [ -d "wrt_core" ]; then
     WRT_CORE_PATH="wrt_core"
 elif [ -d "../wrt_core" ]; then
@@ -19,6 +27,7 @@ Build_Mod=$2
 
 CONFIG_FILE="$BASE_PATH/deconfig/$Dev.config"
 INI_FILE="$BASE_PATH/compilecfg/$Dev.ini"
+UPDATE_SCRIPT="$BASE_PATH/local/maintim_update.sh"
 
 if [[ ! -f $CONFIG_FILE ]]; then
     echo "Config not found: $CONFIG_FILE"
@@ -30,9 +39,23 @@ if [[ ! -f $INI_FILE ]]; then
     exit 1
 fi
 
+if [[ ! -f $UPDATE_SCRIPT ]]; then
+    echo "Update script not found: $UPDATE_SCRIPT"
+    exit 1
+fi
+
 read_ini_by_key() {
     local key=$1
     awk -F"=" -v key="$key" '$1 == key {print $2}' "$INI_FILE"
+}
+
+append_config_if_exists() {
+    local source_file="$1"
+    local target_file="$2"
+
+    if [[ -f $source_file ]]; then
+        cat "$source_file" >>"$target_file"
+    fi
 }
 
 remove_uhttpd_dependency() {
@@ -48,18 +71,26 @@ remove_uhttpd_dependency() {
 }
 
 apply_config() {
-    \cp -f "$CONFIG_FILE" "$BASE_PATH/../$BUILD_DIR/.config"
-    
-    if grep -qE "(ipq60xx|ipq807x)" "$BASE_PATH/../$BUILD_DIR/.config" &&
-        ! grep -q "CONFIG_GIT_MIRROR" "$BASE_PATH/../$BUILD_DIR/.config"; then
-        cat "$BASE_PATH/deconfig/nss.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    local target_config="$BASE_PATH/../$BUILD_DIR/.config"
+
+    \cp -f "$CONFIG_FILE" "$target_config"
+
+    if grep -qE "(ipq60xx|ipq807x)" "$target_config" &&
+        ! grep -q "CONFIG_GIT_MIRROR" "$target_config"; then
+        append_config_if_exists "$BASE_PATH/deconfig/nss.config" "$target_config"
     fi
 
-    cat "$BASE_PATH/deconfig/compile_base.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    append_config_if_exists "$BASE_PATH/deconfig/compile_base.config" "$target_config"
+    append_config_if_exists "$BASE_PATH/deconfig/docker_deps.config" "$target_config"
+    append_config_if_exists "$BASE_PATH/deconfig/proxy.config" "$target_config"
+    append_config_if_exists "$BASE_PATH/deconfig/disable_packages.config" "$target_config"
 
-    cat "$BASE_PATH/deconfig/docker_deps.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
-
-    cat "$BASE_PATH/deconfig/proxy.config" >> "$BASE_PATH/../$BUILD_DIR/.config"
+    if [ -d "$BASE_PATH/local/config" ]; then
+        for extra_config in "$BASE_PATH"/local/config/*.config; do
+            [ -f "$extra_config" ] || continue
+            append_config_if_exists "$extra_config" "$target_config"
+        done
+    fi
 }
 
 REPO_URL=$(read_ini_by_key "REPO_URL")
@@ -73,7 +104,7 @@ if [[ -d action_build ]]; then
     BUILD_DIR="action_build"
 fi
 
-"$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
+"$UPDATE_SCRIPT" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
 
 apply_config
 remove_uhttpd_dependency

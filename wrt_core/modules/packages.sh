@@ -19,7 +19,7 @@ remove_unwanted_packages() {
     )
     local small8_packages=(
         "ppp" "firewall" "dae" "daed" "daed-next" "libnftnl" "nftables" "dnsmasq" "luci-app-alist"
-        "alist" "opkg"
+        "alist" "opkg" "smartdns" "luci-app-smartdns" "easytier"
     )
 
     for pkg in "${luci_packages[@]}"; do
@@ -69,82 +69,16 @@ update_golang() {
     fi
 }
 
-
-clone_sparse_repo_packages() {
-    local repo_url="$1"
-    local target_dir="$2"
-    shift 2
-
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-
-    if ! git clone --depth 1 --filter=blob:none --no-checkout "$repo_url" "$tmp_dir"; then
-        echo "Error: failed to clone $repo_url" >&2
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-
-    pushd "$tmp_dir" >/dev/null
-    git sparse-checkout init --cone
-    git sparse-checkout set "$@" || {
-        echo "Error: failed to sparse-checkout packages from $repo_url" >&2
-        popd >/dev/null
-        rm -rf "$tmp_dir"
-        exit 1
-    }
-    git checkout --quiet
-    popd >/dev/null
-
-    mkdir -p "$target_dir"
-    for pkg in "$@"; do
-        rm -rf "$target_dir/$pkg"
-        cp -rf "$tmp_dir/$pkg" "$target_dir/"
-    done
-
-    rm -rf "$tmp_dir"
-}
-
-restore_missing_small8_packages() {
-    local small8_dir="$BUILD_DIR/feeds/small8"
-
-    if [ ! -d "$small8_dir" ]; then
-        echo "Error: $small8_dir does not exist" >&2
-        exit 1
-    fi
-
-    if [ ! -d "$small8_dir/ddns-go" ] || [ ! -d "$small8_dir/luci-app-ddns-go" ]; then
-        echo "Restoring missing small8 packages: ddns-go / luci-app-ddns-go..."
-        clone_sparse_repo_packages "https://github.com/sirpdboy/luci-app-ddns-go.git" "$small8_dir" ddns-go luci-app-ddns-go
-    fi
-
-    if [ ! -d "$small8_dir/luci-app-homeproxy" ]; then
-        echo "Restoring missing small8 package: luci-app-homeproxy..."
-        rm -rf "$small8_dir/luci-app-homeproxy"
-        if ! git clone --depth 1 "https://github.com/immortalwrt/homeproxy.git" "$small8_dir/luci-app-homeproxy"; then
-            echo "Error: failed to clone homeproxy repository" >&2
-            exit 1
-        fi
-    fi
-
-    if [ ! -d "$small8_dir/lucky" ] || [ ! -d "$small8_dir/luci-app-lucky" ]; then
-        echo "Restoring missing small8 packages: lucky / luci-app-lucky..."
-        clone_sparse_repo_packages "https://github.com/gdy666/luci-app-lucky.git" "$small8_dir" lucky luci-app-lucky
-    fi
-}
-
 install_small8() {
-    local small8_install_packages=(
-        xray-core xray-plugin dns2tcp dns2socks haproxy hysteria
-        naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata geoview v2ray-plugin
-        tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev
-        v2dat adguardhome luci-app-adguardhome luci-lib-xterm luci-app-cloudflarespeedtest
-        netdata luci-app-netdata luci-app-openclash luci-app-amlogic tailscale luci-app-tailscale
-        oaf open-app-filter luci-app-oaf easytier luci-app-easytier msd_lite luci-app-msd_lite
-        cups luci-app-cupsd smartdns luci-app-smartdns
-        luci-app-homeproxy luci-app-lucky lucky ddns-go luci-app-ddns-go
-    )
-
-    ./scripts/feeds install -p small8 -f "${small8_install_packages[@]}"
+    ./scripts/feeds install -p small8 -f xray-core xray-plugin dns2tcp dns2socks haproxy hysteria \
+        naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata geoview v2ray-plugin \
+        tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev \
+        v2dat mosdns luci-app-mosdns adguardhome luci-app-adguardhome ddns-go \
+        luci-app-ddns-go taskd luci-lib-xterm luci-lib-taskd luci-app-store quickstart \
+        luci-app-quickstart luci-app-istorex luci-app-cloudflarespeedtest netdata luci-app-netdata \
+        lucky luci-app-lucky luci-app-openclash luci-app-homeproxy luci-app-amlogic nikki luci-app-nikki \
+        tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier \
+        msd_lite luci-app-msd_lite cups luci-app-cupsd
 }
 
 install_passwall() {
@@ -226,91 +160,6 @@ add_timecontrol() {
     if ! git clone --depth 1 "$repo_url" "$timecontrol_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-timecontrol 仓库失败" >&2
         exit 1
-    fi
-
-    # 修复菜单路径 (admin/control -> admin/services)
-    # 必须在 clone 之后立即执行，否则文件不存在
-    local menu_json="$timecontrol_dir/luci-app-timecontrol/root/usr/share/luci/menu.d/luci-app-timecontrol.json"
-    if [ -f "$menu_json" ]; then
-        sed -i 's/admin\/control/admin\/services/g' "$menu_json"
-        echo "timecontrol 菜单路径已修复"
-    else
-        echo "Warning: timecontrol menu.d JSON 未找到，菜单路径未修复" >&2
-    fi
-
-    # 修复 rpcd ACL: 添加 /bin/ps 命令路径白名单
-    # 根因: rpcd file.exec 需要同时满足 ubus 方法权限 + 命令路径白名单
-    #       上游 ACL 只有 ubus.file.exec, 缺少 file."/bin/ps".exec
-    #       导致 LuCI 前端 fs.exec('/bin/ps') 被拒绝 → 状态永远显示未运行
-    local acl_json="$timecontrol_dir/luci-app-timecontrol/root/usr/share/rpcd/acl.d/luci-app-timecontrol.json"
-    if [ -f "$acl_json" ]; then
-        cat > "$acl_json" << 'ACLEOF'
-{
-   "luci-app-timecontrol": {
-        "description": "Grant UCI Internet time control for luci-app-timecontrol",
-        "read": {
-            "file": {
-                "/bin/ps": ["exec"],
-                "/bin/ps w": ["exec"]
-            },
-            "ubus": {
-                "file": ["exec", "list", "stat", "read"],
-                "uci": [ "*" ],
-                "timecontrol": ["*"]
-            }
-        },
-        "write": {
-            "ubus": {
-                "timecontrol": ["*"],
-                "file": ["write"],
-                "uci": ["*"]
-            }
-        }
-    }
-}
-ACLEOF
-        echo "timecontrol rpcd ACL 已修复 (添加 /bin/ps exec 白名单)"
-    fi
-
-    # 修复 timecontrol “显示未运行”根因:
-    # 上游 init 仅在存在 option enable '1' 规则时才启动 timecontrolctrl 进程，
-    # LuCI 前端又通过 ps 检测该进程 => 默认状态下永远显示未运行。
-    # 这里改为始终启动控制进程，由规则决定是否实际执行封禁动作。
-    local init_script="$timecontrol_dir/luci-app-timecontrol/root/etc/init.d/timecontrol"
-    if [ -f "$init_script" ]; then
-        python - "$init_script" <<'PY'
-from pathlib import Path
-import re
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="latin-1")
-lines = text.splitlines()
-
-out = []
-i = 0
-replaced = False
-while i < len(lines):
-    if re.match(r'^\s*_timecontrol_start\(\)\s*\{', lines[i]):
-        out.append("_timecontrol_start() {")
-        out.append("\ttouch $LOCK")
-        out.append("\ttimecontrol start")
-        out.append("\tstart_instance")
-        out.append("}")
-        replaced = True
-        i += 1
-        while i < len(lines) and lines[i].strip() != "}":
-            i += 1
-        if i < len(lines):
-            i += 1
-        continue
-    out.append(lines[i])
-    i += 1
-
-if replaced:
-    path.write_text("\n".join(out) + "\n", encoding="latin-1", newline="\n")
-PY
-        echo "timecontrol init 已修复 (无规则时仍保持服务运行)"
     fi
 }
 
@@ -449,20 +298,75 @@ update_diskman() {
     fi
 }
 
+_sync_luci_lib_docker() {
+    local lib_path="$BUILD_DIR/feeds/luci/libs/luci-lib-docker"
+    local repo_url="https://github.com/lisaac/luci-lib-docker.git"
+    
+    if [ ! -d "$lib_path" ]; then
+        echo "正在同步 luci-lib-docker..."
+        mkdir -p "$BUILD_DIR/feeds/luci/libs" || return
+        cd "$BUILD_DIR/feeds/luci/libs" || return
+        
+        if ! git clone --filter=blob:none --no-checkout "$repo_url" luci-lib-docker-tmp; then
+            echo "错误：从 $repo_url 克隆 luci-lib-docker 仓库失败" >&2
+            exit 1
+        fi
+        cd luci-lib-docker-tmp || return
+        
+        git sparse-checkout init --cone
+        git sparse-checkout set collections/luci-lib-docker || return
+        
+        git checkout --quiet
+        
+        mv collections/luci-lib-docker ../luci-lib-docker || return
+        cd .. || return
+        \rm -rf luci-lib-docker-tmp
+        cd "$BUILD_DIR"
+        echo "luci-lib-docker 同步完成"
+    fi
+}
+
+update_dockerman() {
+    local path="$BUILD_DIR/feeds/luci/applications/luci-app-dockerman"
+    local repo_url="https://github.com/lisaac/luci-app-dockerman.git"
+    if [ -d "$path" ]; then
+        echo "正在更新 dockerman..."
+        _sync_luci_lib_docker || return
+        
+        cd "$BUILD_DIR/feeds/luci/applications" || return
+        \rm -rf "luci-app-dockerman"
+
+        if ! git clone --filter=blob:none --no-checkout "$repo_url" dockerman; then
+            echo "错误：从 $repo_url 克隆 dockerman 仓库失败" >&2
+            exit 1
+        fi
+        cd dockerman || return
+
+        git sparse-checkout init --cone
+        git sparse-checkout set applications/luci-app-dockerman || return
+
+        git checkout --quiet
+
+        mv applications/luci-app-dockerman ../luci-app-dockerman || return
+        cd .. || return
+        \rm -rf dockerman
+        cd "$BUILD_DIR"
+
+        echo "dockerman 更新完成"
+    fi
+}
+
 add_quickfile() {
     local repo_url="https://github.com/sbwml/luci-app-quickfile.git"
     local target_dir="$BUILD_DIR/package/emortal/quickfile"
-    # Pin to v1.0.9 commit - v1.0.10 source tarball not yet available upstream
-    local QUICKFILE_COMMIT="5d863b9"
     if [ -d "$target_dir" ]; then
         rm -rf "$target_dir"
     fi
     echo "正在添加 luci-app-quickfile..."
-    if ! git clone "$repo_url" "$target_dir"; then
+    if ! git clone --depth 1 "$repo_url" "$target_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-quickfile 仓库失败" >&2
         exit 1
     fi
-    git -C "$target_dir" checkout "$QUICKFILE_COMMIT"
 
     local makefile_path="$target_dir/quickfile/Makefile"
     if [ -f "$makefile_path" ]; then

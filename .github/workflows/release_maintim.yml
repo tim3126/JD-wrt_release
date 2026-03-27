@@ -1,5 +1,5 @@
-name: Build WRT
-run-name: Build - ${{ inputs.model }}
+name: Release Maintim WRT
+run-name: Maintim Release - ${{ inputs.model }}
 
 on:
   workflow_dispatch:
@@ -8,27 +8,18 @@ on:
         required: true
         description: Device Model
         type: choice
-        default: jdcloud_ipq60xx_immwrt
+        default: jdcloud_er1_libwrt
         options:
-          - aliyun_ap8220_immwrt
-          - cmcc_rax3000m_immwrt
-          - gemtek_w1701k_immwrt
-          - jdcloud_ax6000_immwrt
-          - jdcloud_ipq60xx_immwrt
-          - jdcloud_ipq60xx_libwrt
-          - link_nn6000v2_immwrt
-          - linksys_mx4x00_immwrt
-          - qihoo_360v6_immwrt
-          - redmi_ax5_immwrt
-          - redmi_ax6_immwrt
-          - redmi_ax6_libwrt
-          - redmi_ax6000_immwrt21
-          - zn_m2_immwrt
-          - zn_m2_libwrt
-          - x64_immwrt
+          - jdcloud_er1_libwrt
+      update_feeds:
+        required: false
+        description: 'Update Feeds (ignore lock and save latest)'
+        type: boolean
+        default: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  UPDATE_FEEDS: ${{ inputs.update_feeds && '1' || '0' }}
 
 jobs:
   build:
@@ -67,8 +58,8 @@ jobs:
         uses: actions/cache@v5.0.2
         with:
           path: |
-            ./action_build/.ccache
             ./action_build/staging_dir
+            ./action_build/dl
           key: ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-${{ env.BUILD_DATE }}
           restore-keys: |
             ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-
@@ -77,34 +68,42 @@ jobs:
         run: |
           if [ -d "./action_build/staging_dir" ]; then
             find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
-                find "$dir" -type f -exec touch {} +
+              find "$dir" -type f -exec touch {} +
             done
           fi
 
       - name: Build Firmware
-        run: ./build.sh ${{ inputs.model }}
+        run: ./build_maintim.sh ${{ inputs.model }}
+        env:
+          UPDATE_FEEDS: ${{ env.UPDATE_FEEDS }}
 
-      - name: Delete Old Cache
+      - name: Get Kernel Version
         run: |
-          # 获取缓存列表并删除
-          gh cache list --key ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}- --json key --jq '.[] | .key' | while read -r key; do
-            gh cache delete "$key"
-          done
-          # 输出缓存状态
-          echo "========cache status========"
-          echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
-          echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
+          echo "KVER=$(grep -oP '^kernel.*' ./firmware/*.manifest | grep -oP '[4-6]\.[0-9]{1,3}\.[0-9]{1,3}')" >> $GITHUB_ENV
 
-      - name: Machine Information
+      - name: Prepare Release Body
         run: |
-          echo "=============================================="
-          lscpu | grep -E "name|Core|Thread"
-          echo "=============================================="
-          df -h
-          echo "=============================================="
+          echo "## JDCloud ER1 Maintim Firmware" > release_body.txt
+          echo "" >> release_body.txt
+          echo "Kernel: ${{ env.KVER }}" >> release_body.txt
+          echo "LAN: 192.168.1.1" >> release_body.txt
 
-      - name: Upload Firmware
-        uses: actions/upload-artifact@v6
+      - name: Commit Feed Locks
+        if: always()
+        run: |
+          if git diff --quiet wrt_core/feed_locks.ini 2>/dev/null; then
+            echo "feed_locks.ini unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add wrt_core/feed_locks.ini
+            git commit -m "chore: 更新 feed 锁定"
+            git push
+          fi
+
+      - name: Release Firmware
+        uses: softprops/action-gh-release@v2.5.0
         with:
-          name: ${{ env.BUILD_DATE }}_${{ inputs.model }}
-          path: ./firmware/*.*
+          tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model }}
+          files: ./firmware/*.*
+          body_path: ./release_body.txt

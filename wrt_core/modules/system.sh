@@ -5,7 +5,7 @@ fix_default_set() {
         find "$BUILD_DIR/feeds/luci/collections/" -type f -name "Makefile" -exec sed -i "s/luci-theme-bootstrap/luci-theme-$THEME_SET/g" {} \;
     fi
 
-    install -Dm544 "$BASE_PATH/patches/990_set_default_lang_theme" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/990_set_default_lang_theme"
+    install -Dm544 "$BASE_PATH/patches/990_set_argon_primary" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/990_set_argon_primary"
     install -Dm544 "$BASE_PATH/patches/991_custom_settings" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/991_custom_settings"
     install -Dm544 "$BASE_PATH/patches/992_set-wifi-uci.sh" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/992_set-wifi-uci.sh"
 
@@ -289,57 +289,6 @@ update_menu_location() {
     if [ -d "$(dirname "$tailscale_path")" ] && [ -f "$tailscale_path" ]; then
         sed -i 's/services/vpn/g' "$tailscale_path"
     fi
-
-    # 修复 ddns-go 菜单路径错误 (adminrvices -> admin/services)
-    local ddnsgo_path="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/usr/share/luci/menu.d/luci-app-ddns-go.json"
-    if [ -d "$(dirname "$ddnsgo_path")" ] && [ -f "$ddnsgo_path" ]; then
-        sed -i 's/adminrvices/admin\/services/g' "$ddnsgo_path"
-    fi
-
-    # 修复 pbr 菜单路径错误 (adminrvices -> admin/services)
-    local pbr_path="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/root/usr/share/luci/menu.d/luci-app-pbr.json"
-    if [ -d "$(dirname "$pbr_path")" ] && [ -f "$pbr_path" ]; then
-        sed -i 's/adminrvices/admin\/services/g' "$pbr_path"
-    fi
-
-}
-
-# 添加 ddns-go UCI 默认配置并修复 init.d 脚本 bug
-add_ddnsgo_uci_defaults() {
-    local uci_defaults_dir="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/etc/uci-defaults"
-    local config_dir="$BUILD_DIR/feeds/small8/luci-app-ddns-go/root/etc/config"
-    local initd_script="$BUILD_DIR/feeds/small8/ddns-go/files/ddns-go.init"
-
-    if [ -d "$BUILD_DIR/feeds/small8/luci-app-ddns-go" ]; then
-        mkdir -p "$uci_defaults_dir"
-        mkdir -p "$config_dir"
-
-        # 创建默认配置文件
-        cat > "$config_dir/ddns-go" << 'EOF'
-config ddns-go 'config'
-    option enabled '0'
-    option port '9876'
-EOF
-
-        # 创建 uci-defaults 脚本确保配置存在
-        cat > "$uci_defaults_dir/99-ddns-go-init" << 'EOF'
-#!/bin/sh
-[ -f /etc/config/ddns-go ] || {
-    touch /etc/config/ddns-go
-    uci set ddns-go.config=ddns-go
-    uci set ddns-go.config.enabled='0'
-    uci commit ddns-go
-}
-exit 0
-EOF
-        chmod +x "$uci_defaults_dir/99-ddns-go-init"
-    fi
-
-    # 修复 ddns-go init.d 脚本 bug: config_foreach 第二个参数应为配置类型 (ddns-go)，而不是配置节名 (basic)
-    if [ -f "$initd_script" ]; then
-        sed -i 's/config_foreach get_config basic/config_foreach get_config ddns-go/' "$initd_script"
-        echo "ddns-go init.d 脚本已修复"
-    fi
 }
 
 fix_compile_coremark() {
@@ -432,395 +381,6 @@ EOF
     fi
 }
 
-fix_oaf_kernel_compat() {
-    local source_paths=(
-        "$BUILD_DIR/feeds/small8/oaf/src/app_filter.c"
-        "$BUILD_DIR/package/feeds/small8/oaf/src/app_filter.c"
-    )
-    local config_source_paths=(
-        "$BUILD_DIR/feeds/small8/oaf/src/app_filter_config.c"
-        "$BUILD_DIR/package/feeds/small8/oaf/src/app_filter_config.c"
-    )
-    local makefile_paths=(
-        "$BUILD_DIR/feeds/small8/oaf/Makefile"
-        "$BUILD_DIR/package/feeds/small8/oaf/Makefile"
-    )
-
-    # Fix app_filter_config.c: class_create API changed in kernel 6.4+
-    for config_path in "${config_source_paths[@]}"; do
-        [ -f "$config_path" ] || continue
-        if grep -q 'class_create(THIS_MODULE' "$config_path"; then
-            sed -i 's/class_create(THIS_MODULE, *\(.*\))/class_create(\1)/' "$config_path"
-            echo "已修复 $config_path 中的 class_create API (6.4+ 兼容)"
-        fi
-    done
-
-    for source_path in "${source_paths[@]}"; do
-        [ -f "$source_path" ] || continue
-
-        python - "$source_path" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-
-for name in [
-    "__add_app_feature",
-    "add_app_feature",
-    "af_init_feature",
-    "load_feature_buf_from_file",
-    "load_feature_config",
-    "parse_flow_base",
-    "parse_https_proto",
-    "parse_http_proto",
-    "af_match_by_pos",
-    "af_match_by_url",
-    "af_match_one",
-    "app_filter_match",
-    "__af_update_client_app_info",
-    "af_update_client_app_info",
-    "TEST_cJSON",
-    "init_oaf_timer",
-    "fini_oaf_timer",
-    "netlink_oaf_init",
-]:
-    text = text.replace(f"\nint {name}(", f"\nstatic int {name}(")
-    text = text.replace(f"\nvoid {name}(", f"\nstatic void {name}(")
-
-text = text.replace(
-    "\tmm_segment_t fs;\n",
-    "#if LINUX_VERSION_CODE <= KERNEL_VERSION(5,7,19)\n\tmm_segment_t fs;\n#endif\n",
-    1,
-)
-text = text.replace(
-    "\tif (size == 0) {\n\t\treturn;\n\t}\n",
-    "\tif (size == 0) {\n\t\tfilp_close(fp, NULL);\n\t\treturn;\n\t}\n",
-    1,
-)
-text = text.replace("\tint i;\n\tint index = -1;\n", "\tint index = -1;\n", 1)
-text = text.replace("\tint found = 0;\n", "", 1)
-text = text.replace("\tint i;\n\tint index = 0;\n", "", 1)
-text = text.replace("\tstatic int bytes1 = 0;\n", "", 1)
-text = text.replace("time=%d action=%s, %d/%d\\n", "time=%lu action=%s, %d/%d\\n", 1)
-
-path.write_text(text, encoding="utf-8", newline="\n")
-PY
-    done
-
-    for makefile_path in "${makefile_paths[@]}"; do
-        [ -f "$makefile_path" ] || continue
-        if ! grep -q 'Wno-error' "$makefile_path"; then
-            sed -i 's|EXTRA_CFLAGS="$(EXTRA_CFLAGS)"|EXTRA_CFLAGS="$(EXTRA_CFLAGS) -Wno-error"|' "$makefile_path"
-        fi
-    done
-}
-
-
-fix_oaf_init() {
-    local init_paths=(
-        "$BUILD_DIR/feeds/small8/open-app-filter/files/appfilter.init"
-        "$BUILD_DIR/package/feeds/small8/open-app-filter/files/appfilter.init"
-    )
-
-    for init_path in "${init_paths[@]}"; do
-        [ -f "$init_path" ] || continue
-
-        if grep -q '/proc/sys/oaf' "$init_path"; then
-            continue
-        fi
-
-        awk '
-        /^[[:space:]]*insmod oaf[[:space:]]*$/ {
-            indent = substr($0, 1, match($0, /[^ 	]/) - 1)
-            print indent "modprobe oaf 2>/dev/null || insmod /lib/modules/$(uname -r)/oaf.ko"
-            print indent "[ -d /proc/sys/oaf ] || return 1"
-            next
-        }
-        { print }
-        ' "$init_path" >"$init_path.tmp" && mv "$init_path.tmp" "$init_path"
-    done
-}
-
-add_service_default_policies() {
-    local uci_defaults_dir="$BUILD_DIR/package/base-files/files/etc/uci-defaults"
-    local script_path="$uci_defaults_dir/zzz_service_defaults"
-
-    mkdir -p "$uci_defaults_dir"
-
-    cat >"$script_path" <<'EOF'
-#!/bin/sh
-
-# SmartDNS: 确保配置节存在，然后强制禁用
-[ -f /etc/config/smartdns ] || touch /etc/config/smartdns
-uci -q get smartdns.@smartdns[0] >/dev/null 2>&1 || uci add smartdns smartdns >/dev/null 2>&1
-uci -q set smartdns.@smartdns[0].enabled='0'
-uci -q commit smartdns
-/etc/init.d/smartdns disable 2>/dev/null
-
-# SmartDNS: 修补 init START 优先级，避免在 uci-defaults 之前运行
-if [ -f /etc/init.d/smartdns ]; then
-    sed -i 's/^START=[0-9]*/START=94/' /etc/init.d/smartdns
-fi
-
-# CUPS
-if uci -q get cupsd.config >/dev/null 2>&1; then
-    uci -q set cupsd.config.enabled='0'
-    uci -q commit cupsd
-    /etc/init.d/cupsd disable 2>/dev/null
-fi
-
-# Docker: 保持默认启用，用于部署项目
-
-# TimeControl: 修复 rpcd ACL 缺少 /bin/ps 命令白名单导致 LuCI 状态显示未运行
-TC_ACL="/usr/share/rpcd/acl.d/luci-app-timecontrol.json"
-if [ -f "$TC_ACL" ] && ! grep -q '"/bin/ps"' "$TC_ACL"; then
-    cat > "$TC_ACL" << 'TCEOF'
-{
-   "luci-app-timecontrol": {
-        "description": "Grant UCI Internet time control for luci-app-timecontrol",
-        "read": {
-            "file": {
-                "/bin/ps": ["exec"],
-                "/bin/ps w": ["exec"]
-            },
-            "ubus": {
-                "file": ["exec", "list", "stat", "read"],
-                "uci": [ "*" ],
-                "timecontrol": ["*"]
-            }
-        },
-        "write": {
-            "ubus": {
-                "timecontrol": ["*"],
-                "file": ["write"],
-                "uci": ["*"]
-            }
-        }
-    }
-}
-TCEOF
-fi
-
-# PBR: 首次启动兜底同步 compat，避免 LuCI 提示版本不匹配
-PBR_INIT="/etc/init.d/pbr"
-PBR_RPCD="/usr/libexec/rpcd/luci.pbr"
-PBR_STATUS_JS="/www/luci-static/resources/pbr/status.js"
-if [ -f "$PBR_INIT" ]; then
-    pbr_pkg_compat="$(grep -o "packageCompat='[0-9][0-9]*'" "$PBR_INIT" 2>/dev/null | head -n1 | grep -o "[0-9][0-9]*")"
-    if [ -n "$pbr_pkg_compat" ]; then
-        if [ -f "$PBR_RPCD" ]; then
-            pbr_rpcd_compat="$(grep -o "rpcdCompat='[0-9][0-9]*'" "$PBR_RPCD" 2>/dev/null | head -n1 | grep -o "[0-9][0-9]*")"
-            if [ -n "$pbr_rpcd_compat" ] && [ "$pbr_rpcd_compat" != "$pbr_pkg_compat" ]; then
-                sed -i "s/rpcdCompat='${pbr_rpcd_compat}'/rpcdCompat='${pbr_pkg_compat}'/" "$PBR_RPCD"
-            fi
-        fi
-        if [ -f "$PBR_STATUS_JS" ]; then
-            pbr_luci_compat="$(sed -n '/LuciCompat/,/return/{s/.*return \+\([0-9]\+\).*/\1/p}' "$PBR_STATUS_JS" 2>/dev/null | head -n1)"
-            if [ -n "$pbr_luci_compat" ] && [ "$pbr_luci_compat" != "$pbr_pkg_compat" ]; then
-                sed -i "/LuciCompat/,/return/{s/return ${pbr_luci_compat}/return ${pbr_pkg_compat}/}" "$PBR_STATUS_JS"
-            fi
-        fi
-    fi
-fi
-
-# Docker Events: 修复 uwsgi worker 耗尽导致 LuCI 卡死
-# 根因: Docker events 是流式 API, 每次调用会长时间占用一个 uwsgi worker
-#       events.js 页面加载时 load()+renderEventsTable() 同时发起调用,
-#       占满全部 2 个 uwsgi worker → nginx upstream timeout → 整个 LuCI UI 冻结
-# 修复: 页面加载时不发起任何 Docker events 调用, 用户通过过滤器手动触发
-EVENTS_JS="/www/luci-static/resources/view/dockerman/events.js"
-if [ -f "$EVENTS_JS" ]; then
-    # 1) load(): 移除 dm2.docker_events() 阻塞调用, 返回空结果
-    sed -i 's|dm2\.docker_events([^)]*)|Promise.resolve({code:200,body:[]})|' "$EVENTS_JS"
-    # 2) render(): 移除自动调用 renderEventsTable, 避免页面加载时发起流式请求
-    sed -i 's|this\.renderEventsTable(event_list)|void 0|' "$EVENTS_JS"
-    # 3) From 日期选择器默认值: 1970-01-01 → 1小时前
-    sed -i "s|'value':[ ]*'1970-01-01T00:00'|'value':new Date(Date.now()-3600000).toISOString().slice(0,16)|" "$EVENTS_JS"
-    # 4) renderEventsTable() 中 since 默认回退: '0' → 1小时前 (用户触发时生效)
-    sed -i "s|let since[ ]*=[ ]*'0'|let since=Math.floor((Date.now()-3600000)/1000).toString()|" "$EVENTS_JS"
-    # 5) 手动过滤触发: 短路 executeDockerAction(dm2.docker_events), 渲染空表
-    sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$EVENTS_JS"
-fi
-
-# SmartDNS LuCI: 修复状态显示永远显示 "RUNNING" 的 bug
-# 根因: smartdnsServiceStatus() 返回 Promise.all([getServiceStatus()]),
-#       结果是数组 [false]，而 JS 中 if([false]) 为 truthy → 永远显示 RUNNING
-# 修复: smartdnsRenderStatus(res) → smartdnsRenderStatus(res[0])，取出数组中的布尔值
-SMARTDNS_JS="/www/luci-static/resources/view/smartdns/smartdns.js"
-if [ -f "$SMARTDNS_JS" ]; then
-    sed -i 's/smartdnsRenderStatus(res)/smartdnsRenderStatus(res[0])/' "$SMARTDNS_JS"
-fi
-
-exit 0
-EOF
-
-    chmod +x "$script_path"
-}
-
-# 构建时修补 SmartDNS: 修改 init START 优先级、禁用自启、优化 DNS 配置
-# 核心策略: 直接 sed 修改 feed 目录中的 init 脚本和配置文件
-# (quilt patch 仅作为补充，覆盖从源码编译的情况)
-fix_smartdns_default_state() {
-    local patch_src="$BASE_PATH/patches/100-smartdns-optimize.patch"
-    local found=0
-
-    # 查找 SmartDNS feed 包目录（支持 packages feed 和 small8 feed）
-    local smartdns_dirs=(
-        "$BUILD_DIR/feeds/packages/net/smartdns"
-        "$BUILD_DIR/feeds/small8/smartdns"
-    )
-
-    # === 1. 直接 sed 修改 feed 目录中的 init 脚本 (最关键的修复) ===
-    # feed 目录中的 files/etc/init.d/smartdns 会被直接安装到固件中，
-    # 优先级高于 quilt patch 修改的源码中的 init 脚本
-    for pkg_dir in "${smartdns_dirs[@]}"; do
-        local init_script="$pkg_dir/files/etc/init.d/smartdns"
-        [ -f "$init_script" ] || continue
-        if grep -q '^START=19' "$init_script"; then
-            sed -i 's/^START=19/START=94/' "$init_script"
-            echo "[SmartDNS] 已直接修改 feed init 脚本 START=19 -> 94: $init_script"
-            found=$((found + 1))
-        elif grep -q '^START=' "$init_script"; then
-            echo "[SmartDNS] feed init 脚本 START 值已非 19，跳过: $init_script (当前值: $(grep '^START=' "$init_script"))"
-        fi
-    done
-    # 也搜索通用 init 脚本路径 (以防目录结构不同)
-    while IFS= read -r init_script; do
-        [ -f "$init_script" ] || continue
-        if grep -q '^START=19' "$init_script"; then
-            sed -i 's/^START=19/START=94/' "$init_script"
-            echo "[SmartDNS] 已直接修改 init 脚本 START=19 -> 94: $init_script"
-            found=$((found + 1))
-        fi
-    done < <(
-        find -L "$BUILD_DIR" -path "*/smartdns/files/etc/init.d/smartdns" -type f 2>/dev/null || true
-    )
-
-    # === 2. 安装 quilt patch (补充: 覆盖从源码编译 init 脚本的情况) ===
-    if [ -f "$patch_src" ]; then
-        for pkg_dir in "${smartdns_dirs[@]}"; do
-            [ -d "$pkg_dir" ] || continue
-            [ -f "$pkg_dir/Makefile" ] || continue
-            local patches_dir="$pkg_dir/patches"
-            mkdir -p "$patches_dir"
-            cp -f "$patch_src" "$patches_dir/"
-            echo "[SmartDNS] 已安装 quilt patch 到: $patches_dir/"
-            found=$((found + 1))
-        done
-    fi
-
-    # === 3. 禁用 SmartDNS 默认自启配置 ===
-    while IFS= read -r cfg; do
-        [ -f "$cfg" ] || continue
-        if grep -q "option enabled '1'" "$cfg"; then
-            sed -i "s/option enabled '1'/option enabled '0'/g" "$cfg"
-            echo "[SmartDNS] 已修补默认配置 enabled='0': $cfg"
-            found=$((found + 1))
-        fi
-    done < <(
-        find -L "$BUILD_DIR" \
-            \( -path "*/smartdns/files/etc/config/smartdns" \
-            -o -path "*/smartdns/files/smartdns.conf" \
-            -o -path "*/smartdns/files/smartdns.config" \) \
-            -type f 2>/dev/null || true
-    )
-
-    # === 4. 移除 Makefile 中的 postinst enable 调用 ===
-    while IFS= read -r mk; do
-        [ -f "$mk" ] || continue
-        if grep -qE '/etc/init\.d/smartdns[[:space:]]+enable' "$mk"; then
-            sed -i '/\/etc\/init\.d\/smartdns[[:space:]][[:space:]]*enable/d' "$mk"
-            echo "[SmartDNS] 已从 Makefile 移除 smartdns enable: $mk"
-            found=$((found + 1))
-        fi
-    done < <(find -L "$BUILD_DIR" -path "*/smartdns/Makefile" -type f 2>/dev/null || true)
-
-    # === 5. 修复 LuCI SmartDNS 状态显示 bug ===
-    # smartdnsServiceStatus() 返回 Promise.all([...]) 即数组，JS 中 if([false]) 为 truthy
-    # 修复: smartdnsRenderStatus(res) → smartdnsRenderStatus(res[0])
-    while IFS= read -r luci_js; do
-        [ -f "$luci_js" ] || continue
-        if grep -q 'smartdnsRenderStatus(res)' "$luci_js"; then
-            sed -i 's/smartdnsRenderStatus(res)/smartdnsRenderStatus(res[0])/' "$luci_js"
-            echo "[SmartDNS] 已修复 LuCI 状态显示 bug: $luci_js"
-            found=$((found + 1))
-        fi
-    done < <(find -L "$BUILD_DIR" -path "*/smartdns/htdocs/luci-static/resources/view/smartdns/smartdns.js" -type f 2>/dev/null || true)
-
-    if [ "$found" -eq 0 ]; then
-        echo "Warning: 未找到任何 SmartDNS 文件可修改" >&2
-    fi
-}
-
-# 限制 QuickFile 和 Docker 的内存/CPU 占用
-fix_service_resource_limits() {
-    # --- QuickFile: Go 二进制，优化 GC 策略和资源限制 ---
-    # 注意: Go 程序的 VSZ (虚拟内存) 通常超过 1GB，这是 Go 运行时预留地址空间的正常行为，
-    # 实际物理内存占用 (RSS) 远小于 VSZ。以下优化可进一步控制 GC 行为。
-    local qf_init_paths=(
-        "$BUILD_DIR/package/emortal/quickfile/quickfile/files/quickfile.init"
-    )
-
-    for init in "${qf_init_paths[@]}"; do
-        [ -f "$init" ] || continue
-        if grep -q 'GOMEMLIMIT' "$init"; then
-            continue
-        fi
-        # GOMEMLIMIT=256MiB: Go GC 软上限，堆超过 256MB 后 GC 激进回收
-        sed -i '/procd_set_param respawn/a\    procd_set_param env GOMEMLIMIT=256MiB' "$init"
-        # 移除不必要的 core=unlimited
-        sed -i '/procd_set_param limits core="unlimited"/d' "$init"
-        # 将 nofile 降到合理值
-        sed -i 's/procd_set_param limits nofile="200000 200000"/procd_set_param limits nofile="8192 8192"/' "$init"
-        echo "已为 QuickFile 优化 Go GC 策略 (GOMEMLIMIT=256MiB)"
-    done
-
-    # --- Docker: 限制 dockerd OOM 优先级，保护路由核心服务 ---
-    while IFS= read -r init; do
-        if grep -q 'oom_score_adj' "$init"; then
-            continue
-        fi
-        # OOM 得分 500: 内存不足时优先杀 docker，保护路由核心
-        sed -i '/procd_close_instance/i\        procd_set_param oom_score_adj 500' "$init"
-        sed -i '/procd_close_instance/i\        procd_set_param limits nofile="8192 8192"' "$init"
-        echo "已为 dockerd 添加 OOM 保护 (oom_score_adj=500)"
-    done < <(find "$BUILD_DIR" -path "*/dockerd/files/dockerd.init" -type f 2>/dev/null)
-}
-
-patch_dockerman_ui() {
-    local source_root=""
-
-    if [ -d "$BUILD_DIR/feeds/luci/applications/luci-app-dockerman" ]; then
-        source_root="$BUILD_DIR/feeds/luci/applications/luci-app-dockerman"
-    elif [ -d "$BUILD_DIR/package/feeds/luci/luci-app-dockerman" ]; then
-        source_root="$BUILD_DIR/package/feeds/luci/luci-app-dockerman"
-    else
-        return
-    fi
-
-    install -Dm644 "$BASE_PATH/patches/dockerman/configuration.lua" \
-        "$source_root/luasrc/model/cbi/dockerman/configuration.lua"
-    install -Dm644 "$BASE_PATH/patches/dockerman/overview.lua" \
-        "$source_root/luasrc/model/cbi/dockerman/overview.lua"
-
-    # 修复事件页: Docker events 流式 API 占满 uwsgi worker 导致 LuCI 卡死
-    local events_js="$source_root/htdocs/luci-static/resources/view/dockerman/events.js"
-    if [ -f "$events_js" ]; then
-        # 1) load(): 移除 dm2.docker_events() 阻塞调用, 返回空结果
-        sed -i "s|dm2\.docker_events([^)]*)|Promise.resolve({code: 200, body: []})|" "$events_js"
-        # 2) render(): 移除自动调用 renderEventsTable, 避免页面加载时发起流式请求
-        sed -i 's|this\.renderEventsTable(event_list)|void 0|' "$events_js"
-        # 3) From 日期选择器默认值: 1970-01-01 → 1小时前
-        sed -i "s/'value': '1970-01-01T00:00'/'value': new Date(Date.now() - 3600000).toISOString().slice(0, 16)/" "$events_js"
-        # 4) renderEventsTable() 中 since 默认回退: '0' → 1小时前 (用户触发时生效)
-        sed -i "s/let since = '0'/let since = Math.floor((Date.now() - 3600000) \/ 1000).toString()/" "$events_js"
-        # 5) 手动过滤触发: 短路 executeDockerAction(dm2.docker_events), 渲染空表
-        sed -i 's|view\.executeDockerAction(dm2\.docker_events|flushBatch();void(0)\&\&view.executeDockerAction(dm2.docker_events|' "$events_js"
-        echo "已修复 dockerman events.js: 禁止页面加载时自动查询Docker events"
-    fi
-}
-
 update_geoip() {
     local geodata_path="$BUILD_DIR/package/feeds/small8/v2ray-geodata/Makefile"
     if [ -d "${geodata_path%/*}" ] && [ -f "$geodata_path" ]; then
@@ -898,6 +458,23 @@ fix_opkg_check() {
     if [ -f "$patch_file" ]; then
         install -Dm644 "$patch_file" "$opkg_dir/patches/001-fix-provides-version-parsing.patch"
     fi
+
+    local opkg_makefile="$opkg_dir/Makefile"
+    if [ -f "$opkg_makefile" ]; then
+        sed -i 's/^PKG_MIRROR_HASH:=.*/PKG_MIRROR_HASH:=skip/' "$opkg_makefile"
+    fi
+}
+
+fix_nss_package_hashes() {
+    local nss_feed_dir="$BUILD_DIR/feeds/nss_packages"
+    local makefile_path
+
+    [ -d "$nss_feed_dir" ] || return 0
+
+    find "$nss_feed_dir" -type f -name Makefile | while read -r makefile_path; do
+        grep -q '^PKG_SOURCE_PROTO:=git' "$makefile_path" || continue
+        sed -i 's/^PKG_MIRROR_HASH:=.*/PKG_MIRROR_HASH:=skip/' "$makefile_path"
+    done
 }
 
 install_pbr_cmcc() {
@@ -939,36 +516,44 @@ config include\\
     fi
 }
 
-fix_pbr_version_mismatch() {
-    local pbr_init="$BUILD_DIR/feeds/packages/net/pbr/files/etc/init.d/pbr"
-    local luci_rpcd="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/root/usr/libexec/rpcd/luci.pbr"
-    local luci_status_js="$BUILD_DIR/feeds/luci/applications/luci-app-pbr/htdocs/luci-static/resources/pbr/status.js"
+fix_pbr_ip_forward() {
+    local pbr_pkg_dir="$BUILD_DIR/package/feeds/packages/pbr"
+    local pbr_init_script="$pbr_pkg_dir/files/etc/init.d/pbr"
 
-    [ -f "$pbr_init" ] || return 0
-
-    # 从 pbr init.d 提取 packageCompat 值作为基准
-    local pkg_compat
-    pkg_compat=$(grep -oP "packageCompat='\K[0-9]+" "$pbr_init" 2>/dev/null)
-    [ -n "$pkg_compat" ] || return 0
-
-    # 同步 rpcd compat
-    if [ -f "$luci_rpcd" ]; then
-        local rpcd_compat
-        rpcd_compat=$(grep -oP "rpcdCompat='\K[0-9]+" "$luci_rpcd" 2>/dev/null)
-        if [ -n "$rpcd_compat" ] && [ "$rpcd_compat" != "$pkg_compat" ]; then
-            sed -i "s/rpcdCompat='${rpcd_compat}'/rpcdCompat='${pkg_compat}'/" "$luci_rpcd"
-            echo "PBR: rpcd compat ${rpcd_compat} -> ${pkg_compat}"
-        fi
+    if [ ! -d "$pbr_pkg_dir" ]; then
+        echo "PBR package directory not found: $pbr_pkg_dir"
+        return 1
     fi
 
-    # 同步 LuCI JS compat (getter 跨多行，用 sed 提取)
-    if [ -f "$luci_status_js" ]; then
-        local luci_compat
-        luci_compat=$(sed -n '/LuciCompat/,/return/{s/.*return \+\([0-9]\+\).*/\1/p}' "$luci_status_js" 2>/dev/null)
-        if [ -n "$luci_compat" ] && [ "$luci_compat" != "$pkg_compat" ]; then
-            sed -i "/LuciCompat/,/return/{s/return ${luci_compat}/return ${pkg_compat}/}" "$luci_status_js"
-            echo "PBR: LuCI compat ${luci_compat} -> ${pkg_compat}"
-        fi
+    if [ ! -f "$pbr_init_script" ]; then
+        echo "PBR init script not found: $pbr_init_script"
+        return 1
+    fi
+
+    # Check if fix is already applied (enabled check already present)
+    if grep -q '\[ -n "$enabled" \] && \[ -n "$strict_enforcement" \]' "$pbr_init_script"; then
+        echo "PBR IP Forward fix already applied"
+        return 0
+    fi
+
+    # Check if the original pattern exists that needs fixing
+    if ! grep -q '\[ -n "$strict_enforcement" \] && \[ "$(cat /proc/sys/net/ipv4/ip_forward)"' "$pbr_init_script"; then
+        echo "PBR IP Forward: 未找到需要修复的代码，可能上游已修复或此版本无此问题"
+        return 0
+    fi
+
+    echo "正在应用 PBR IP Forward 修复..."
+    # Fix: Add enabled check before strict_enforcement check
+    # Original: if [ -n "$strict_enforcement" ] && [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "0" ]; then
+    # Fixed:   if [ -n "$enabled" ] && [ -n "$strict_enforcement" ] && [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "0" ]; then
+    sed -i 's/\[ -n "\$strict_enforcement" \] && \[ "\$(cat \/proc\/sys\/net\/ipv4\/ip_forward)"/\[ -n "\$enabled" \] \&\& \[ -n "\$strict_enforcement" \] \&\& \[ "\$(cat \/proc\/sys\/net\/ipv4\/ip_forward)"/' "$pbr_init_script"
+    
+    if grep -q '\[ -n "$enabled" \] && \[ -n "$strict_enforcement" \]' "$pbr_init_script"; then
+        echo "PBR IP Forward 修复应用成功"
+        return 0
+    else
+        echo "修复应用失败：未找到预期的修复内容"
+        return 1
     fi
 }
 
@@ -1068,23 +653,6 @@ remove_tweaked_packages() {
         if grep -q "^DEFAULT_PACKAGES += \$(DEFAULT_PACKAGES.tweak)" "$target_mk"; then
             sed -i 's/DEFAULT_PACKAGES += $(DEFAULT_PACKAGES.tweak)/# DEFAULT_PACKAGES += $(DEFAULT_PACKAGES.tweak)/g' "$target_mk"
         fi
-    fi
-}
-
-# 设置 nikki (Mihomo) 默认下载地址为代理地址，解决国内无法访问 GitHub 导致面板 404 问题
-add_nikki_proxy_defaults() {
-    local nikki_config="$BUILD_DIR/feeds/nikki/luci-app-nikki/root/etc/config/nikki"
-    
-    if [ -f "$nikki_config" ]; then
-        echo "正在设置 nikki 默认代理下载地址..."
-        
-        # 替换 geoip_mmdb_url 为代理地址
-        sed -i "s|option geoip_mmdb_url 'https://github.com/|option geoip_mmdb_url 'https://gh-proxy.com/https://github.com/|g" "$nikki_config"
-        
-        # 替换 ui_url 为代理地址
-        sed -i "s|option ui_url 'https://github.com/|option ui_url 'https://gh-proxy.com/https://github.com/|g" "$nikki_config"
-        
-        echo "nikki 代理下载地址设置完成。"
     fi
 }
 
