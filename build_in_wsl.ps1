@@ -8,6 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
 $buildArgs = @("./build_maintim.sh", $Model)
 if ($BuildMode) {
     $buildArgs += $BuildMode

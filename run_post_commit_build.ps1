@@ -9,6 +9,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $gitDir = Join-Path $repoRoot ".git"
 $pendingPath = Join-Path $gitDir "maintim-post-commit-build.pending"
@@ -41,8 +45,7 @@ try {
             & $syncScript -Distro $Distro -WslUser $WslUser -TargetDir $TargetDir -Quiet
             Write-Log "sync completed"
 
-            & $buildScript -Distro $Distro -WslUser $WslUser -TargetDir $TargetDir -Model $Model -BuildMode $BuildMode 2>&1 |
-                Tee-Object -FilePath $logPath -Append | Out-Host
+            & $buildScript -Distro $Distro -WslUser $WslUser -TargetDir $TargetDir -Model $Model -BuildMode $BuildMode | Out-Null
 
             if ($LASTEXITCODE -ne 0) {
                 throw "build script exited with code $LASTEXITCODE"
