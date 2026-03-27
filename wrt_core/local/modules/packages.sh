@@ -87,26 +87,30 @@ clone_sparse_repo_packages() {
 
 restore_missing_small8_packages() {
     local small8_dir="$BUILD_DIR/feeds/small8"
+    local small8_real_dir=""
 
     if [ ! -d "$small8_dir" ]; then
         echo "Error: $small8_dir does not exist" >&2
         exit 1
     fi
 
-    if [ ! -d "$small8_dir/ddns-go" ] || [ ! -d "$small8_dir/luci-app-ddns-go" ]; then
-        clone_sparse_repo_packages "https://github.com/sirpdboy/luci-app-ddns-go.git" "$small8_dir" ddns-go luci-app-ddns-go
+    small8_real_dir=$(readlink -f "$small8_dir" 2>/dev/null || true)
+    [ -n "$small8_real_dir" ] || small8_real_dir="$small8_dir"
+
+    if [ ! -d "$small8_real_dir/ddns-go" ] || [ ! -d "$small8_real_dir/luci-app-ddns-go" ]; then
+        clone_sparse_repo_packages "https://github.com/sirpdboy/luci-app-ddns-go.git" "$small8_real_dir" ddns-go luci-app-ddns-go
     fi
 
-    if [ ! -d "$small8_dir/luci-app-homeproxy" ]; then
-        rm -rf "$small8_dir/luci-app-homeproxy"
-        if ! git clone --depth 1 "https://github.com/immortalwrt/homeproxy.git" "$small8_dir/luci-app-homeproxy"; then
+    if [ ! -d "$small8_real_dir/luci-app-homeproxy" ]; then
+        rm -rf "$small8_real_dir/luci-app-homeproxy"
+        if ! git clone --depth 1 "https://github.com/immortalwrt/homeproxy.git" "$small8_real_dir/luci-app-homeproxy"; then
             echo "Error: failed to clone homeproxy repository" >&2
             exit 1
         fi
     fi
 
-    if [ ! -d "$small8_dir/lucky" ] || [ ! -d "$small8_dir/luci-app-lucky" ]; then
-        clone_sparse_repo_packages "https://github.com/gdy666/luci-app-lucky.git" "$small8_dir" lucky luci-app-lucky
+    if [ ! -d "$small8_real_dir/lucky" ] || [ ! -d "$small8_real_dir/luci-app-lucky" ]; then
+        clone_sparse_repo_packages "https://github.com/gdy666/luci-app-lucky.git" "$small8_real_dir" lucky luci-app-lucky
     fi
 }
 
