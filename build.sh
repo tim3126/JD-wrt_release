@@ -14,6 +14,13 @@ fi
 
 BASE_PATH=$(cd "$WRT_CORE_PATH" && pwd)
 
+sanitize_path_for_wsl_build() {
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    export PATH
+}
+
+sanitize_path_for_wsl_build
+
 Dev=$1
 Build_Mod=$2
 
@@ -175,6 +182,38 @@ remove_uhttpd_dependency() {
     fi
 }
 
+fix_generated_kconfig_issues() {
+    local metadata_file="$BASE_PATH/../$BUILD_DIR/scripts/package-metadata.pl"
+    local fwupd_config="$BASE_PATH/../$BUILD_DIR/feeds/packages/utils/fwupd/Config.in"
+
+    if [ -f "$metadata_file" ]; then
+        python3 - "$metadata_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = 'if ($1 ne "PACKAGE_$pkgname") {'
+new = 'if ($1 ne "PACKAGE_$pkgname" && $dep->{$1} ne \'select\') {'
+if old in text:
+    text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8", newline="\n")
+PY
+    fi
+
+    if [ -f "$fwupd_config" ]; then
+        python3 - "$fwupd_config" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+lines = [line for line in lines if line.strip() != "depends on PACKAGE_fwupd-libs"]
+path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+PY
+    fi
+}
+
 apply_config() {
     \cp -f "$CONFIG_FILE" "$BASE_PATH/../$BUILD_DIR/.config"
     
@@ -202,6 +241,7 @@ if [[ -d action_build ]]; then
 fi
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
+fix_generated_kconfig_issues
 
 apply_config
 remove_uhttpd_dependency

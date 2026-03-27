@@ -53,6 +53,22 @@ update_default_lan_addr() {
     fi
 }
 
+# 覆盖前面的旧定义，兼容当前 upstream 的 Kconfig 生成逻辑。
+fix_kconfig_recursive_dependency() {
+    local metadata_file="$BUILD_DIR/scripts/package-metadata.pl"
+    local fwupd_config="$BUILD_DIR/feeds/packages/utils/fwupd/Config.in"
+
+    if [ -f "$metadata_file" ]; then
+        sed -i "s/if (\\\$1 ne \\\"PACKAGE_\\\$pkgname\\\") {/if (\\\$1 ne \\\"PACKAGE_\\\$pkgname\\\" \\&\\& \\\$dep->{\\\$1} ne 'select') {/g" "$metadata_file"
+        echo "已修复 package-metadata.pl 的 Kconfig 递归依赖生成逻辑。"
+    fi
+
+    if [ -f "$fwupd_config" ]; then
+        sed -i '/depends on PACKAGE_fwupd-libs/d' "$fwupd_config"
+        echo "已移除 fwupd Config.in 中的递归依赖条件。"
+    fi
+}
+
 remove_something_nss_kmod() {
     local ipq_mk_path="$BUILD_DIR/target/linux/qualcommax/Makefile"
     local target_mks=("$BUILD_DIR/target/linux/qualcommax/ipq60xx/target.mk" "$BUILD_DIR/target/linux/qualcommax/ipq807x/target.mk")
