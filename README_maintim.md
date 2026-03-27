@@ -36,16 +36,46 @@ Windows 资源管理器可直接打开：
 powershell -ExecutionPolicy Bypass -File .\sync_to_wsl.ps1
 ```
 
-启动监听，同步但不自动编译：
+手动启动监听，同步但不自动编译：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start_watch_sync_to_wsl.ps1
 ```
 
-启动监听，同步后自动触发 WSL 增量编译：
+手动启动监听，同步后自动触发 WSL 增量编译：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start_watch_sync_build_to_wsl.ps1
+```
+
+## 提交后自动增量编译
+
+如果你只想在 `git commit` 成功后才触发一次本地 WSL 增量编译，安装 post-commit hook：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_post_commit_build_hook.ps1
+```
+
+安装后，每次在 Windows 仓库里执行 `git commit` 成功，都会自动：
+
+- 同步代码到 `/home/tim/src/JD-wrt_release`
+- 在 WSL 中执行 `./build_maintim.sh jdcloud_er1_libwrt`
+
+为了避免连续提交时并发跑多个编译，后台脚本带了互斥锁和待处理标记：
+
+- 已有编译在跑时，新提交不会再起第二个并发编译
+- 当前编译结束后，会自动补跑一次最新提交
+
+后台日志位置：
+
+```text
+.git/maintim-post-commit-build.log
+```
+
+卸载 post-commit hook：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall_post_commit_build_hook.ps1
 ```
 
 ## GitHub Actions
