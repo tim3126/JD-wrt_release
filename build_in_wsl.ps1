@@ -21,6 +21,7 @@ $quotedArgs = ($buildArgs | ForEach-Object { "'" + ($_ -replace "'", "''") + "'"
 $bashScript = @"
 set -euo pipefail
 cd '$TargetDir'
+find . -type f \( -name '*.sh' -o -path './.git/hooks/*' \) -print0 | xargs -0r dos2unix -q
 $quotedArgs
 "@
 

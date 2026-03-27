@@ -2,7 +2,6 @@
 
 DOCKER_STACK_MODULE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DOCKER_STACK_REPO_ROOT=$(cd "$DOCKER_STACK_MODULE_DIR/../.." && pwd)
-DOCKER_STACK_CANONICAL_DOCKERD_INIT="$DOCKER_STACK_REPO_ROOT/imm-nss/package/feeds/packages/dockerd/files/dockerd.init"
 
 DOCKER_STACK_COMPONENTS=(
     "runc"
@@ -248,6 +247,29 @@ _docker_stack_warn() {
     echo "警告：$*" >&2
 }
 
+_docker_stack_resolve_canonical_dockerd_init() {
+    local build_dir="$1"
+    local dockerd_init="$2"
+    local candidate=""
+    local rel_path="$DOCKER_STACK_DOCKERD_INIT_REL"
+    local search_roots=(
+        "$build_dir"
+        "$DOCKER_STACK_REPO_ROOT/imm-nss"
+        "$DOCKER_STACK_REPO_ROOT/libwrt"
+        "$DOCKER_STACK_REPO_ROOT"
+    )
+
+    for candidate in "${search_roots[@]}"; do
+        candidate="$candidate/$rel_path"
+        if [ -f "$candidate" ] && [ "$candidate" != "$dockerd_init" ] && _docker_stack_init_supports_nftables_backend "$candidate"; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 _docker_stack_init_supports_nftables_backend() {
     local dockerd_init="$1"
 
@@ -256,40 +278,42 @@ _docker_stack_init_supports_nftables_backend() {
         && grep -Fq 'nft add rule inet "${NFT_DOCKER_USER_TABLE}" "${NFT_DOCKER_USER_CHAIN}" iifname "${inbound}" oifname "${outbound}" reject' "$dockerd_init"
 }
 
-_docker_stack_ensure_nftables_init_support() {
-    local dockerd_init="$1"
-    local canonical_init="$DOCKER_STACK_CANONICAL_DOCKERD_INIT"
+_docker_stack_prepare_dockerd_firewall_backend() {
+    local build_dir="$1"
+    local dockerd_init="$2"
+    local canonical_init=""
 
     if _docker_stack_init_supports_nftables_backend "$dockerd_init"; then
+        echo "nftables"
         return 0
     fi
 
-    [ -f "$canonical_init" ] || {
-        echo "错误：缺少 nftables 兼容 dockerd.init 模板: $canonical_init" >&2
-        return 1
-    }
+    if canonical_init=$(_docker_stack_resolve_canonical_dockerd_init "$build_dir" "$dockerd_init"); then
+        _docker_stack_warn "$dockerd_init 缺少 nftables backend 逻辑，使用 $canonical_init 进行同步"
+        cp "$canonical_init" "$dockerd_init" || {
+            echo "错误：同步 dockerd.init 到 nftables 版本失败" >&2
+            return 1
+        }
 
-    if [ "$canonical_init" = "$dockerd_init" ]; then
-        echo "错误：当前 dockerd.init 缺少 nftables backend 逻辑，且不存在可用外部模板" >&2
+        if _docker_stack_init_supports_nftables_backend "$dockerd_init"; then
+            echo "nftables"
+            return 0
+        fi
+
+        echo "错误：同步后 $dockerd_init 仍缺少 nftables backend 逻辑" >&2
         return 1
     fi
 
-    _docker_stack_warn "$dockerd_init 缺少 nftables backend 逻辑，使用 $canonical_init 进行同步"
-    cp "$canonical_init" "$dockerd_init" || {
-        echo "错误：同步 dockerd.init 到 nftables 版本失败" >&2
-        return 1
-    }
-
-    _docker_stack_init_supports_nftables_backend "$dockerd_init" || {
-        echo "错误：同步后 $dockerd_init 仍缺少 nftables backend 逻辑" >&2
-        return 1
-    }
+    _docker_stack_warn "$dockerd_init 仍为旧版 init 模板，当前构建树缺少可复用的 nftables 参考模板，暂时回退为 iptables 默认后端"
+    echo "iptables"
+    return 0
 }
 
 _docker_stack_update_dockerd_nftables_defaults() {
     local build_dir="$1"
     local dry_run="$2"
     local storage_driver="$3"
+    local firewall_backend=""
     local dockerd_makefile="$build_dir/$DOCKER_STACK_DOCKERD_MAKEFILE_REL"
     local dockerd_config="$build_dir/$DOCKER_STACK_DOCKERD_CONFIG_REL"
     local dockerd_init="$build_dir/$DOCKER_STACK_DOCKERD_INIT_REL"
@@ -318,8 +342,8 @@ _docker_stack_update_dockerd_nftables_defaults() {
         if _docker_stack_init_supports_nftables_backend "$dockerd_init"; then
             echo "[dry-run] dockerd firewall_backend will be forced to nftables"
         else
-            echo "[dry-run] dockerd.init lacks nftables backend support and will be synchronized from $DOCKER_STACK_CANONICAL_DOCKERD_INIT"
-            echo "[dry-run] dockerd firewall_backend will be forced to nftables after sync"
+            echo "[dry-run] dockerd.init lacks local nftables backend support and will try to synchronize from a compatible template"
+            echo "[dry-run] if no compatible template is available, dockerd firewall_backend will fall back to iptables"
         fi
         if [ -n "$storage_driver" ]; then
             echo "[dry-run] dockerd storage_driver will be set to $storage_driver"
@@ -331,14 +355,18 @@ _docker_stack_update_dockerd_nftables_defaults() {
     _docker_stack_update_dockerd_depends_block "$dockerd_makefile" || return 1
     _docker_stack_fix_dockerd_vendored_checks "$dockerd_makefile" || return 1
 
-    _docker_stack_ensure_nftables_init_support "$dockerd_init" || return 1
+    firewall_backend=$(_docker_stack_prepare_dockerd_firewall_backend "$build_dir" "$dockerd_init") || return 1
 
-    _docker_stack_set_or_append_dockerd_uci_option "$dockerd_config" "firewall_backend" "nftables" || return 1
+    _docker_stack_set_or_append_dockerd_uci_option "$dockerd_config" "firewall_backend" "$firewall_backend" || return 1
     if [ -n "$storage_driver" ]; then
         _docker_stack_set_or_append_dockerd_uci_option "$dockerd_config" "storage_driver" "$storage_driver" || return 1
     fi
-    _docker_stack_fix_dockerd_nftables_comment "$dockerd_config"
-    echo "dockerd nftables 默认策略已应用。"
+    if [ "$firewall_backend" = "nftables" ]; then
+        _docker_stack_fix_dockerd_nftables_comment "$dockerd_config"
+        echo "dockerd nftables 默认策略已应用。"
+    else
+        echo "dockerd 当前缺少 nftables init 支持，已保留 iptables 默认后端以避免行为回退。"
+    fi
 
     _docker_stack_set_or_append_sysctl_value "$dockerd_sysctl" "net.ipv4.ip_forward" "1" || return 1
     _docker_stack_set_or_append_sysctl_value "$dockerd_sysctl" "net.ipv6.conf.all.forwarding" "1" || return 1

@@ -27,6 +27,50 @@ fix_default_set() {
 fix_mk_def_depends() {
     upstream_fix_mk_def_depends
     install_libubox_cmake_patch
+    fix_libxml2_host_install
+}
+
+fix_libxml2_host_install() {
+    local makefile_path="$BUILD_DIR/package/libs/libxml2/Makefile"
+
+    [ -f "$makefile_path" ] || return 0
+
+    python3 - "$makefile_path" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+old = """define Host/Install
+\t$(call Host/Install/Default)
+\tmv $(1)/bin/xml2-config $(1)/bin/$(GNU_HOST_NAME)-xml2-config
+\t$(LN) $(GNU_HOST_NAME)-xml2-config $(1)/bin/xml2-config
+endef
+"""
+
+new = """define Host/Install
+\t$(call Host/Install/Default)
+\tif [ ! -L $(1)/bin/xml2-config ]; then \\
+\t\t[ ! -e $(1)/bin/$(GNU_HOST_NAME)-xml2-config ] && mv $(1)/bin/xml2-config $(1)/bin/$(GNU_HOST_NAME)-xml2-config || true; \\
+\t\trm -f $(1)/bin/xml2-config; \\
+\t\t$(LN) $(GNU_HOST_NAME)-xml2-config $(1)/bin/xml2-config; \\
+\tfi
+endef
+"""
+
+if old in text:
+    text = text.replace(old, new, 1)
+else:
+    pattern = re.compile(
+        r"define Host/Install\n\t\$\((?:call )?Host/Install/Default\)\n\tmv \$\(1\)/bin/xml2-config \$\(1\)/bin/\$\(GNU_HOST_NAME\)-xml2-config\n\t\$\(LN\) \$\(GNU_HOST_NAME\)-xml2-config \$\(1\)/bin/xml2-config\nendef\n",
+        re.MULTILINE,
+    )
+    text = pattern.sub(new, text, count=1)
+
+path.write_text(text, encoding="utf-8", newline="\n")
+PY
 }
 
 update_menu_location() {
