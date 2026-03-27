@@ -1,0 +1,10 @@
+*.sh text eol=lf
+wrt_core/patches/cpuusage text eol=lf
+wrt_core/patches/tempinfo text eol=lf
+wrt_core/patches/hnatusage text eol=lf
+wrt_core/patches/smp_affinity text eol=lf
+wrt_core/patches/990_set_argon_primary text eol=lf
+wrt_core/patches/991_custom_settings text eol=lf
+wrt_core/patches/992_set-wifi-uci.sh text eol=lf
+wrt_core/patches/pbr.user.cmcc text eol=lf
+wrt_core/patches/pbr.user.cmcc6 text eol=lf
