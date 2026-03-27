@@ -24,5 +24,6 @@ cd '$TargetDir'
 find . -type f \( -name '*.sh' -o -path './.git/hooks/*' \) -print0 | xargs -0r dos2unix -q
 $quotedArgs
 "@
+$bashScript = $bashScript -replace "`r`n", "`n"
 
 & wsl -d $Distro -u $WslUser bash -lc $bashScript

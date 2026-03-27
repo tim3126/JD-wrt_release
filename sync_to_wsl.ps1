@@ -45,6 +45,7 @@ set -euo pipefail
 mkdir -p '$syncTarget'
 rsync -a --delete $excludeArgs '$syncSource' '$syncTarget'
 "@
+$bashScript = $bashScript -replace "`r`n", "`n"
 
 & wsl -d $Distro -u $WslUser bash -lc $bashScript | Out-Null
 

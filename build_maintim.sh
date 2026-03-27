@@ -45,7 +45,7 @@ fi
 
 read_ini_by_key() {
     local key=$1
-    awk -F"=" -v key="$key" '$1 == key {print $2}' "$INI_FILE"
+    awk -F"=" -v key="$key" '$1 == key { sub(/\r$/, "", $2); print $2 }' "$INI_FILE"
 }
 
 append_config_if_exists() {
