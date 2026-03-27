@@ -82,7 +82,39 @@ prepare_small8_feed() {
     fi
 
     mkdir -p "$local_feeds_root"
-    rm -rf "$local_small8_dir"
+
+    if [ -d "$local_small8_dir/.git" ]; then
+        for repo in "${small8_repos[@]}"; do
+            echo "Refreshing existing small8 feed from $repo"
+            git -C "$local_small8_dir" remote set-url origin "$repo" >/dev/null 2>&1 || true
+
+            if [ -n "$locked_hash" ]; then
+                if git -C "$local_small8_dir" rev-parse --verify "$locked_hash^{commit}" >/dev/null 2>&1 \
+                    || git -C "$local_small8_dir" fetch --depth 1 origin "$locked_hash" >/dev/null 2>&1 \
+                    || git -C "$local_small8_dir" fetch origin >/dev/null 2>&1; then
+                    if git -C "$local_small8_dir" checkout -f "$locked_hash" >/dev/null 2>&1; then
+                        git -C "$local_small8_dir" reset --hard "$locked_hash" >/dev/null 2>&1 || true
+                        git -C "$local_small8_dir" clean -ffd >/dev/null 2>&1 || true
+                        return 0
+                    fi
+                fi
+            else
+                if git -C "$local_small8_dir" fetch --depth 1 origin >/dev/null 2>&1 \
+                    || git -C "$local_small8_dir" fetch origin >/dev/null 2>&1; then
+                    if git -C "$local_small8_dir" checkout -f FETCH_HEAD >/dev/null 2>&1; then
+                        git -C "$local_small8_dir" reset --hard FETCH_HEAD >/dev/null 2>&1 || true
+                        git -C "$local_small8_dir" clean -ffd >/dev/null 2>&1 || true
+                        return 0
+                    fi
+                fi
+            fi
+        done
+
+        echo "Warning: failed to refresh existing small8 feed, will re-clone it" >&2
+        rm -rf "$local_small8_dir"
+    elif [ -e "$local_small8_dir" ]; then
+        rm -rf "$local_small8_dir"
+    fi
 
     for repo in "${small8_repos[@]}"; do
         echo "Preparing small8 feed from $repo"
