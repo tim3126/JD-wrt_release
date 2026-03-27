@@ -76,6 +76,7 @@ prepare_small8_feed() {
         "https://gitee.com/aiyboy/small-package.git"
     )
     local locked_hash=""
+    local current_hash=""
 
     if [ "${UPDATE_FEEDS:-0}" != "1" ] && [ -f "$FEED_LOCKS_FILE" ]; then
         locked_hash=$(awk -F'=' '/^small8=/ {print $2}' "$FEED_LOCKS_FILE" | xargs)
@@ -84,9 +85,21 @@ prepare_small8_feed() {
     mkdir -p "$local_feeds_root"
 
     if [ -d "$local_small8_dir/.git" ]; then
+        current_hash=$(git -C "$local_small8_dir" rev-parse HEAD 2>/dev/null || true)
+        if [ -n "$locked_hash" ] && [ "$current_hash" = "$locked_hash" ]; then
+            echo "Reusing existing small8 feed at locked commit $locked_hash"
+            git -C "$local_small8_dir" reset --hard "$locked_hash" >/dev/null 2>&1 || true
+            git -C "$local_small8_dir" clean -ffd >/dev/null 2>&1 || true
+            return 0
+        fi
+
         for repo in "${small8_repos[@]}"; do
             echo "Refreshing existing small8 feed from $repo"
-            git -C "$local_small8_dir" remote set-url origin "$repo" >/dev/null 2>&1 || true
+            if git -C "$local_small8_dir" remote get-url origin >/dev/null 2>&1; then
+                git -C "$local_small8_dir" remote set-url origin "$repo" >/dev/null 2>&1 || true
+            else
+                git -C "$local_small8_dir" remote add origin "$repo" >/dev/null 2>&1 || true
+            fi
 
             if [ -n "$locked_hash" ]; then
                 if git -C "$local_small8_dir" rev-parse --verify "$locked_hash^{commit}" >/dev/null 2>&1 \
