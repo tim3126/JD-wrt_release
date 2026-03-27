@@ -26,7 +26,6 @@ fix_default_set() {
 
 fix_mk_def_depends() {
     upstream_fix_mk_def_depends
-    install_libubox_cmake_patch
     fix_libxml2_host_install
 }
 
