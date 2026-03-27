@@ -2,13 +2,12 @@
 
 set -e
 
+# WSL launched from Windows often inherits /mnt/c style PATH entries,
+# which can break OpenWrt packaging steps such as find -execdir.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 if [ "$(id -u)" = "0" ]; then
     export FORCE_UNSAFE_CONFIGURE=1
-fi
-
-if printf '%s\n' "$PATH" | tr ':' '\n' | grep -qv '^/'; then
-    export PATH
-    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 fi
 
 if [ -d "wrt_core" ]; then
