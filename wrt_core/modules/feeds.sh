@@ -13,11 +13,6 @@ update_feeds() {
         echo "src-git small8 https://github.com/kenzok8/jell" >>"$FEEDS_PATH"
     fi
 
-    if ! grep -q "openwrt-passwall" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall;main" >>"$FEEDS_PATH"
-    fi
-
     if ! grep -q "nikkinikki-org" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
         echo "src-git nikki https://github.com/nikkinikki-org/OpenWrt-nikki.git;main" >>"$FEEDS_PATH"
@@ -47,8 +42,6 @@ install_feeds() {
             if [[ $(basename "$dir") == "small8" ]]; then
                 install_small8
                 install_fullconenat
-            elif [[ $(basename "$dir") == "passwall" ]]; then
-                install_passwall
             elif [[ $(basename "$dir") == "nikki" ]]; then
                 install_nikki
             else
