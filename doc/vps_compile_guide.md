@@ -186,3 +186,54 @@ cd ~/JD-wrt_release
 cd ~/JD-wrt_release
 ./taiyi1_er1.sh stop
 ```
+
+## 十、jdcloud_er1_immwrt 最终默认插件清单
+
+以下清单是当前 `taiyi1` 分支里，`jdcloud_er1_immwrt` 默认会进入固件的重点插件。
+
+默认包含：
+
+- `luci-app-homeproxy`
+- `luci-app-nikki`
+- `nikki`
+- `luci-app-uhttpd`
+- `luci-i18n-uhttpd-zh-cn`
+- `luci-app-ddns`
+- `ddns-scripts`
+- `luci-app-vlmcsd`
+- `luci-theme-bootstrap`
+- `luci-app-quickstart`
+- `luci-i18n-quickstart-zh-cn`
+- `quickstart`
+- `luci-app-adguardhome`
+- `luci-app-autoreboot`
+- `luci-app-cloudflared`
+- `luci-app-diskman`
+- `luci-app-dockerman`
+- `luci-app-frpc`
+- `luci-app-samba4`
+- `luci-app-sqm`
+- `luci-app-timecontrol`
+- `luci-app-easytier`
+- `luci-app-lucky`
+- `luci-app-mosdns`
+- `luci-app-oaf`
+- `luci-app-pbr`
+- `luci-app-smartdns`
+- `luci-app-ttyd`
+- `luci-app-upnp`
+- `luci-app-wol`
+
+默认不包含：
+
+- `luci-app-quickfile`
+- `luci-app-openclash`
+- `luci-app-istorex`
+- `luci-app-passwall`
+
+如果以后修改了默认插件，建议编译完成后用 `manifest` 再核对一次：
+
+```bash
+cd ~/JD-wrt_release
+grep -E "luci-app-|luci-theme-|ddns-scripts|nikki|quickstart" ./firmware/*.manifest
+```
