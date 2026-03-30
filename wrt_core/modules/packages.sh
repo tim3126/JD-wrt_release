@@ -76,9 +76,9 @@ install_small8() {
         v2dat mosdns luci-app-mosdns adguardhome luci-app-adguardhome \
         taskd luci-lib-xterm luci-lib-taskd luci-app-store quickstart \
         luci-app-quickstart luci-app-cloudflarespeedtest netdata luci-app-netdata \
-        lucky luci-app-lucky luci-app-homeproxy luci-app-amlogic \
+        lucky luci-app-lucky luci-app-homeproxy luci-app-ddns-go luci-app-amlogic \
         tailscale luci-app-tailscale oaf open-app-filter luci-app-oaf easytier luci-app-easytier \
-        msd_lite luci-app-msd_lite cups luci-app-cupsd
+        msd_lite luci-app-msd_lite ddns-go cups luci-app-cupsd
 }
 
 install_nikki() {
