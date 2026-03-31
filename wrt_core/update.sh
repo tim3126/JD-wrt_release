@@ -14,6 +14,7 @@ REPO_URL=$1
 REPO_BRANCH=$2
 BUILD_DIR=$3
 COMMIT_HASH=$4
+DEVICE_NAME=${5:-}
 
 # Convert BUILD_DIR to absolute path
 if [[ "$BUILD_DIR" != /* ]]; then
@@ -25,6 +26,10 @@ GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
 GOLANG_BRANCH="26.x"
 THEME_SET="argon"
 LAN_ADDR="192.168.1.1"
+
+if [[ "$DEVICE_NAME" == "jdcloud_er1_immwrt" ]]; then
+    THEME_SET="bootstrap"
+fi
 
 SCRIPT_DIR=$(cd $(dirname $0) && pwd)
 BASE_PATH=${BASE_PATH:-$SCRIPT_DIR}
@@ -68,7 +73,9 @@ main() {
     update_dnsmasq_conf
     add_backup_info_to_sysupgrade
     update_mosdns_deconfig
-    fix_quickstart
+    if [[ "$DEVICE_NAME" != "jdcloud_er1_immwrt" ]]; then
+        fix_quickstart
+    fi
     update_oaf_deconfig
     add_timecontrol
     add_quickfile
@@ -79,7 +86,9 @@ main() {
     update_dockerman
     set_nginx_default_config
     update_uwsgi_limit_as
-    update_argon
+    if [[ "$DEVICE_NAME" != "jdcloud_er1_immwrt" ]]; then
+        update_argon
+    fi
     update_nginx_ubus_module
     check_default_settings
     install_opkg_distfeeds
