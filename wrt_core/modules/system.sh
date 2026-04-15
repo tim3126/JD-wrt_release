@@ -123,16 +123,40 @@ fix_hash_value() {
 
 apply_hash_fixes() {
     fix_hash_value \
-        "$BUILD_DIR/package/feeds/packages/smartdns/Makefile" \
-        "860a816bf1e69d5a8a2049483197dbebe8a3da2c9b05b2da68c85ef7dee7bdde" \
-        "582021891808442b01f551bc41d7d95c38fb00c1ec78a58ac3aaaf898fbd2b5b" \
+        "$BUILD_DIR/feeds/nss_packages/qca-mcs/Makefile" \
+        "a88bc7747f5564acc574f252b63fdf0b401254bf6584e0cbbac44e171dcddcb6" \
+        "2570ab6c101ded40549b32f795516896ae2fc6c7919ecc2fbf0b059b266a246d" \
+        "qca-mcs"
+
+    fix_hash_value \
+        "$BUILD_DIR/feeds/packages/net/smartdns/Makefile" \
+        "5ef82ea81d5f627f52171e3b487331ecdd270554555cbff3d291590e19f4658d" \
+        "34c85d914e01006439f5e1c9287ae96d6bfcc729ed4bcf386bf5948b938254f4" \
         "smartdns"
 
     fix_hash_value \
-        "$BUILD_DIR/package/feeds/packages/smartdns/Makefile" \
-        "320c99a65ca67a98d11a45292aa99b8904b5ebae5b0e17b302932076bf62b1ec" \
-        "43e58467690476a77ce644f9dc246e8a481353160644203a1bd01eb09c881275" \
-        "smartdns"
+        "$BUILD_DIR/package/system/opkg/Makefile" \
+        "41fb2c79ce6014e28f7dd0cd8c65efe803986278f2587d1d4681883d8847d87c" \
+        "dbe5cb21e881d60733587cad22e01aab52ab5261b5f21003d32d06ff88442add" \
+        "opkg"
+
+    fix_hash_value \
+        "$BUILD_DIR/feeds/nss_packages/qca-nss-drv/Makefile" \
+        "f13681c4aadde3aa713e4ae1426d22f19a387a729521aa1e19ba9d690c17b8e3" \
+        "d88babb964abbc2e21de5b1042ff70b2615e52639964d24f3e1930e6fd572ad5" \
+        "qca-nss-drv"
+
+    fix_hash_value \
+        "$BUILD_DIR/feeds/nss_packages/qca-nss-ecm/Makefile" \
+        "a6b508a41ae79cb579e83ea1d1f5a158c7758ab45f1d26a698677a5ec61ca03d" \
+        "58663b3db5ab7f90d0ba5e4dabecc1b86dbede0401002b8089c1981d1e7a166f" \
+        "qca-nss-ecm"
+
+    fix_hash_value \
+        "$BUILD_DIR/feeds/nss_packages/qca-nss-clients/Makefile" \
+        "5346ff2a8a89f6d671543f22e13594343b27bf81e709f07af46ade03a7614900" \
+        "82951c22dd649977909e6126cf13a7e680665c7e5cd934de8f640c9901e4cfed" \
+        "qca-nss-clients"
 }
 
 update_ath11k_fw() {

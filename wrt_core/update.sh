@@ -107,7 +107,7 @@ main() {
     fix_quectel_cm
     install_pbr_cmcc
     fix_pbr_ip_forward
-    # apply_hash_fixes
+    apply_hash_fixes
 }
 
 main "$@"
