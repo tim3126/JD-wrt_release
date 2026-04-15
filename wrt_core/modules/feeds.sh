@@ -51,6 +51,7 @@ install_feeds() {
                 install_passwall
             elif [[ $(basename "$dir") == "nikki" ]]; then
                 install_nikki
+                fix_nikki_package_build
             else
                 ./scripts/feeds install -f -ap $(basename "$dir")
             fi

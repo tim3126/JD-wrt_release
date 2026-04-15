@@ -91,6 +91,32 @@ install_nikki() {
     ./scripts/feeds install -p nikki -f nikki luci-app-nikki
 }
 
+fix_nikki_package_build() {
+    local makefile_path="$BUILD_DIR/feeds/nikki/nikki/Makefile"
+
+    if [ ! -f "$makefile_path" ]; then
+        return 0
+    fi
+
+    echo "正在修复 nikki 包构建逻辑..."
+
+    if ! grep -q '^define Build/InstallDev' "$makefile_path"; then
+        awk '
+            /^define Build\/Compile$/ && !done {
+                print "define Build/InstallDev"
+                print ""
+                print "endef"
+                print ""
+                done=1
+            }
+            { print }
+        ' "$makefile_path" > "$makefile_path.tmp"
+        mv "$makefile_path.tmp" "$makefile_path"
+    fi
+
+    sed -i 's/^$(eval $(call GoBinPackage,nikki))/# $(eval $(call GoBinPackage,nikki))/' "$makefile_path"
+}
+
 install_fullconenat() {
     if [ ! -d $BUILD_DIR/package/network/utils/fullconenat-nft ]; then
         ./scripts/feeds install -p small8 -f fullconenat-nft
